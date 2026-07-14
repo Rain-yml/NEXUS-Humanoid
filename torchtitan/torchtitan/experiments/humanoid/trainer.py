@@ -638,8 +638,7 @@ class DiffusionTrainer(torch.distributed.checkpoint.stateful.Stateful):
             raise ValueError("A joint-octree batch must contain both mesh and joint tokens")
         mesh_loss = token_loss[~joint_mask].mean()
         joint_loss = token_loss[joint_mask].mean()
-        joint_weight = self.job_config.training.joint_loss_weight
-        loss = (mesh_loss + joint_weight * joint_loss) / (1.0 + joint_weight)
+        loss = token_loss.mean()
         loss.backward()
 
         grad_norm = dist_utils.clip_grad_norm_(

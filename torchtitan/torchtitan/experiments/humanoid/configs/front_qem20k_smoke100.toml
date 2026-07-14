@@ -76,7 +76,6 @@ image_encoder_return_the_nth_hidden_states = -1
 use_foreground_condition_tokens = false
 foreground_condition_token_dilation = 0
 pretrained_path = "/mnt/pfs/users/liyumeng/checkpoints/nexus/octdiff_5B_xpred_vloss_v11000_bs256_na_muon_pack_mv/ckpts_bak/step-128000-emamodel.pth"
-joint_loss_weight = 1.0
 loss_type = "xpred-vloss"
 
 [training.dataset_kwargs]

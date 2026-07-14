@@ -12,5 +12,5 @@ tokens from mesh occupancy tokens.
 
 Inference applies the native thresholding rule to mesh occupancy. Each joint
 uses `argmax` and therefore follows exactly one child while retaining its
-semantic identity. Mesh and joint flow losses are averaged independently and
-combined with the configured `joint_loss_weight`.
+semantic identity. Training applies the original NEXUS token-average flow loss
+uniformly to mesh and joint tokens; separate averages are diagnostics only.

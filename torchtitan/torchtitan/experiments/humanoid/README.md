@@ -7,7 +7,8 @@ behavior are local copies, not subclasses or monkey patches.
   canonical semantics, and combined mesh/joint octree batches.
 - `models`: copied NEXUS octree DiT with semantic joint-token inputs.
 - `pipelines`: copied layerwise inference with one-child joint traversal.
-- `trainer.py`: copied flow-matching trainer with separate mesh/joint averages.
+- `trainer.py`: copied flow-matching trainer with the original token-average loss;
+  mesh/joint averages are diagnostics only.
 - `train_spec.py`: explicit GPU-side registration, imported only by training.
 - `configs`: complete smoke, overfit, and production experiment records.
 

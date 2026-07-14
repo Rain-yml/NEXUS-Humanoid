@@ -29,7 +29,6 @@ class Training:
     foreground_condition_token_dilation: int = 0
     loss_type: str = "vpred-vloss"
     pretrained_path: Optional[str] = None
-    joint_loss_weight: float = 1.0
 
 @dataclass
 class EMA:
