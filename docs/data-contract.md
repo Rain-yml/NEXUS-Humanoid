@@ -28,6 +28,10 @@ Smoke and overfit manifests are deterministic row subsets produced by
 `scripts/humanoid/subset_manifest.py`. They preserve every source column and
 never reinterpret or reconstruct an artifact URI.
 
+The small smoke manifest is checked into the repository at
+`manifests/humanoid_joint_octree/smoke_v1.parquet`; production manifests remain
+on PFS.
+
 The `humanoid-28-v1` schema contains 26 required singleton semantics and two
 ordered spine joints. Mesh vertices define the NEXUS bounding-box transform;
 the identical transform is applied to joint positions before discretization.

@@ -1,6 +1,6 @@
 [job]
-dump_folder = "./outputs/humanoid_joint_octree_smoke"
-description = "50-step smoke test of the production humanoid joint-octree path"
+dump_folder = "./outputs/humanoid_joint_octree_front_overfit50"
+description = "Front-view 50-asset humanoid joint-octree overfit"
 print_args = true
 
 [profiling]
@@ -11,11 +11,11 @@ enable_memory_snapshot = false
 save_memory_snapshot_folder = "memory_snapshot"
 
 [metrics]
-log_freq = 1
+log_freq = 10
 disable_color_printing = false
 enable_tensorboard = true
 save_tb_folder = "tb"
-enable_wandb = true
+enable_wandb = false
 
 [model]
 name = "humanoid-joint-octree"
@@ -26,36 +26,31 @@ name = "Muon"
 lr = 1e-4
 weight_decay = 0.01
 betas = [0.9, 0.99]
-
-mu = 0.99                     # Momentum factor for Muon
-algorithm = "muon"           # Main algorithm to use for 2D matrices
-nesterov = false             # Whether to use Nesterov momentum
-adjust_lr = "spectral_norm"  # How to adjust LR: "spectral_norm", "rms_norm", or null
-flatten = false              # Whether to flatten 3D+ tensors to 2D
-use_triton = true           # Whether to use Triton kernel for Newton-Schulz
-
-# Parameter-specific optimizer selection
-scalar_optimizer = "adamw"        # For 1D parameters (biases, layer norms)
-embedding_optimizer = "adamw"     # For embedding layers
-head_optimizer = "adamw"          # For model head/output layers
-routing_optimizer = "adamw"       # For routing layers (DeepSeek MoE)
-head_lr_scaling = true            # Apply 1/sqrt(dim) scaling to head layers
-expert_optimizer = "adamw"        # All expert weights will use AdamW
-
-# Learning rate scaling factors
-scalar_lr_factor = 1.0            # LR multiplier for scalar parameters
-embedding_lr_factor = 1.0         # LR multiplier for embedding parameters
-head_lr_factor = 1.0              # LR multiplier for head parameters (after head_lr_scaling)
-routing_lr_factor = 1.0           # LR multiplier for routing parameters
+mu = 0.99
+algorithm = "muon"
+nesterov = false
+adjust_lr = "spectral_norm"
+flatten = false
+use_triton = true
+scalar_optimizer = "adamw"
+embedding_optimizer = "adamw"
+head_optimizer = "adamw"
+routing_optimizer = "adamw"
+head_lr_scaling = true
+expert_optimizer = "adamw"
+scalar_lr_factor = 1.0
+embedding_lr_factor = 1.0
+head_lr_factor = 1.0
+routing_lr_factor = 1.0
 
 [lr_scheduler]
-warmup_steps = 10
-decay_ratio = 0.0  # no decay, stay stable during training
+warmup_steps = 500
+decay_ratio = 0.0
 
 [training]
 batch_size = 1
 max_norm = 1.0
-steps = 50
+steps = 10000
 dataset = "rigged-humanoid-joint-octree"
 mixed_precision_param = "bfloat16"
 mixed_precision_reduce = "float32"
@@ -82,8 +77,10 @@ grid_size = 512
 max_depth = 9
 infinite = true
 image_resolution = 512
+view_indices = [0]
 drop_image_rate = 0.1
 max_sample_retries = 3
+pad_to_divisible = true
 
 [scheduler]
 t_sampling_scheme = "logit_normal"
@@ -109,9 +106,9 @@ custom_args_module = "torchtitan.experiments.humanoid.arguments"
 [checkpoint]
 enable_checkpoint = true
 folder = "ckpts"
-interval = 50
+interval = 1000
 model_weights_only = false
-keep_latest_k = 3
+keep_latest_k = 10
 load_step = -1
 
 [activation_checkpoint]
@@ -124,7 +121,7 @@ enabled = false
 [ema]
 enabled = true
 beta = 0.9999
-update_after_step = 10000
+update_after_step = 100
 update_every = 1
 inv_gamma = 1.0
 power = 1.0

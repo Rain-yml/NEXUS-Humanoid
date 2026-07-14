@@ -5,6 +5,8 @@ must be declared in TOML rather than injected by launch scripts.
 
 - `smoke.toml`: 50 steps on the smoke Parquet.
 - `overfit10.toml`: 10,000 steps on a ten-asset Parquet.
+- `front_overfit_50.toml`: 10,000 steps on the tracked 50/10/10 smoke
+  manifest, conditioned only on canonical front view 0.
 - `train_5b_mv.toml`: full production training Parquet.
 
 All three use `humanoid-joint-octree`, the `5b-mv` flavor, the same pretrained

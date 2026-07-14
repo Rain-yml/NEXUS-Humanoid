@@ -67,9 +67,11 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
         grid_size: int = 512,
         max_depth: int = 9,
         image_resolution: int = 512,
+        view_indices: list[int] | None = None,
         drop_image_rate: float = 0.1,
         infinite: bool = True,
         max_sample_retries: int = 3,
+        pad_to_divisible: bool = True,
         force_divisible_by: int = 1,
         dp_rank: int = 0,
         dp_world_size: int = 1,
@@ -81,6 +83,11 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
         self.grid_size = grid_size
         self.max_depth = max_depth
         self.image_resolution = image_resolution
+        self.view_indices = tuple(view_indices if view_indices is not None else range(4))
+        if not self.view_indices or any(index not in range(4) for index in self.view_indices):
+            raise ValueError(f"view_indices must be a non-empty subset of [0, 1, 2, 3]: {view_indices}")
+        if len(set(self.view_indices)) != len(self.view_indices):
+            raise ValueError(f"view_indices must not contain duplicates: {view_indices}")
         self.drop_image_rate = drop_image_rate
         self.infinite = infinite
         self.max_sample_retries = max_sample_retries
@@ -95,14 +102,20 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
             )
         rows = frame.to_dict("records") * repeats
         random.Random(shuffle_seed).shuffle(rows)
-        if force_divisible_by > 1:
-            rows = rows[: len(rows) // force_divisible_by * force_divisible_by]
+        source_row_count = len(rows)
+        if force_divisible_by > 1 and len(rows) % force_divisible_by:
+            if pad_to_divisible:
+                padding = force_divisible_by - len(rows) % force_divisible_by
+                rows.extend(rows[index % len(rows)] for index in range(padding))
+            else:
+                rows = rows[: len(rows) // force_divisible_by * force_divisible_by]
         self.rows = rows[dp_rank::dp_world_size]
         if not self.rows:
             raise ValueError(f"No rows assigned to rank {dp_rank} from {manifest_path}")
         logger.info(
             f"RiggedHumanoidJointOctreeDataset: manifest={manifest_path}, split={split}, "
-            f"rows={len(self.rows)}, joints={len(self.schema.joints)}"
+            f"source_rows={source_row_count}, rank_rows={len(self.rows)}, "
+            f"views={self.view_indices}, joints={len(self.schema.joints)}"
         )
 
     @property
@@ -167,7 +180,7 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
     def get_data(self, row: dict[str, Any]) -> dict[str, Any]:
         mesh_octree, joint_octree = self._load_rig(row)
         images, masks = zip(
-            *(self._load_image(row[f"color_view_{index}_uri"]) for index in range(4))
+            *(self._load_image(row[f"color_view_{index}_uri"]) for index in self.view_indices)
         )
         image_tensor = torch.stack(images)
         if self.drop_image_rate > 0 and random.random() < self.drop_image_rate:
@@ -178,7 +191,7 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
             "joint_octree": joint_octree,
             "images": image_tensor,
             "image_masks": torch.stack(masks),
-            "view_indices": torch.arange(4, dtype=torch.long),
+            "view_indices": torch.tensor(self.view_indices, dtype=torch.long),
         }
 
     def __iter__(self):
