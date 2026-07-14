@@ -38,6 +38,13 @@ dev = [
     "pytest-cov",
     "tensorboard",
 ]
+humanoid = [
+    "bce-python-sdk",
+    "numpy",
+    "pandas",
+    "pillow",
+    "pyarrow",
+]
 
 [tool.setuptools.dynamic]
 version = {file = "assets/version.txt"}
