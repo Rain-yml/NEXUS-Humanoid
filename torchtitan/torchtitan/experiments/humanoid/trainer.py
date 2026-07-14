@@ -537,7 +537,7 @@ class DiffusionTrainer(torch.distributed.checkpoint.stateful.Stateful):
             cond["mv_cu_seqlens"] = batch.mv_cu_seqlens
         return cond
 
-    def train_step(self, input_dict: OctreeBatch):
+    def train_step(self, input_dict: JointOctreeBatch):
         self.optimizers.zero_grad()
         lr = self.lr_schedulers.schedulers[0].get_last_lr()[0]
 

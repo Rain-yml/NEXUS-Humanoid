@@ -38,7 +38,7 @@ def _to_int_list(values) -> List[int]:
 
 def get_octree_condition_lens(
     conditions: Dict[str, torch.Tensor],
-    input_dict: OctreeBatch,
+    input_dict: JointOctreeBatch,
     batch_size: int,
     num_vertex_condition: bool,
     quad_ratio_condition: bool = False,
@@ -916,7 +916,7 @@ class JointOctreeDiffusionModel(ModelMixin, ConfigMixin):
         timesteps: torch.Tensor,
         cu_seqlens: torch.Tensor,
         conditions: Dict[str, torch.Tensor],
-        input_dict: OctreeBatch,
+        input_dict: JointOctreeBatch,
         dtype,
     ):
         pred = self(
