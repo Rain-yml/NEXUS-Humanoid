@@ -35,3 +35,24 @@ def build_joint_layers(points: torch.Tensor, grid_size: int, max_depth: int) -> 
         layer_depths=list(range(max_depth)),
         num_vertices=points.shape[0],
     )
+
+
+def build_joint_specific_layer(
+    points: torch.Tensor, grid_size: int, depth: int
+) -> JointOctreeData:
+    if not 0 <= depth < grid_size.bit_length() - 1:
+        raise ValueError(f"Invalid depth={depth} for grid_size={grid_size}")
+    voxel_size = grid_size // (2**depth)
+    half = voxel_size // 2
+    voxel_coords = points // voxel_size
+    local_points = points - voxel_coords * voxel_size
+    child_bits = (local_points >= half).long()
+    child_ids = child_bits[:, 0] * 4 + child_bits[:, 1] * 2 + child_bits[:, 2]
+    occupancy = torch.zeros((points.shape[0], 8), dtype=torch.long)
+    occupancy.scatter_(1, child_ids[:, None], 1)
+    return JointOctreeData(
+        layer_occupancy=[occupancy],
+        layer_parent_centers=[voxel_coords * voxel_size + half],
+        layer_depths=[depth],
+        num_vertices=points.shape[0],
+    )

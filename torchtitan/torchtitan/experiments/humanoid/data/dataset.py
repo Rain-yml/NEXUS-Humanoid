@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import gc
+import gzip
 import io
+import json
 import random
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -14,14 +17,19 @@ import torch
 from PIL import Image
 from torch.distributed.checkpoint.stateful import Stateful
 from torch.utils.data import IterableDataset
+from torchvision.transforms import v2 as transforms_v2
 
 from torchtitan.experiments.humanoid.data.joint_schema import JointSchema
-from torchtitan.experiments.humanoid.data.joint_octree import build_joint_layers
+from torchtitan.experiments.humanoid.data.joint_octree import (
+    JointOctreeData,
+    build_joint_specific_layer,
+)
 from torchtitan.experiments.humanoid.data.manifest import parse_bos_uri, read_manifest
+from torchtitan.experiments.vem.datasets.mesh_utils import rand_with_pt
 from torchtitan.experiments.vem.datasets.octree_utils import (
     OctreeBatch,
     OctreeData,
-    build_octree_by_layer,
+    build_octree_specific_layer,
     discretize,
 )
 from torchtitan.tools.logging import logger
@@ -55,11 +63,12 @@ def _normalize_like_nexus(vertices: np.ndarray, joints: np.ndarray) -> tuple[np.
 class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
     """Load mesh, canonical joints, and four views from an SSOT Parquet manifest."""
 
-    worker_shard_data = ["rows"]
+    worker_shard_data = ["batches"]
 
     def __init__(
         self,
         manifest_path: str,
+        batches_packed: str,
         joint_schema_path: str,
         split: str = "train",
         repeats: int = 1,
@@ -70,8 +79,6 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
         view_indices: list[int] | None = None,
         drop_image_rate: float = 0.1,
         infinite: bool = True,
-        max_sample_retries: int = 3,
-        pad_to_divisible: bool = True,
         force_divisible_by: int = 1,
         dp_rank: int = 0,
         dp_world_size: int = 1,
@@ -90,9 +97,26 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
             raise ValueError(f"view_indices must not contain duplicates: {view_indices}")
         self.drop_image_rate = drop_image_rate
         self.infinite = infinite
-        self.max_sample_retries = max_sample_retries
         self.sample_idx = 0
         self._bos_client = None
+
+        identity = transforms_v2.Lambda(lambda image: image)
+        self.transform = transforms_v2.Compose(
+            [
+                transforms_v2.RandomApply(
+                    [
+                        transforms_v2.ColorJitter(hue=0.3),
+                        transforms_v2.RandomChoice(
+                            [transforms_v2.GaussianBlur(kernel_size=(3, 7)), identity]
+                        ),
+                        transforms_v2.RandomChoice(
+                            [transforms_v2.JPEG(quality=(20, 80)), identity]
+                        ),
+                    ],
+                    p=0.5,
+                )
+            ]
+        )
 
         frame = read_manifest(manifest_path, split=split)
         schema_names = set(frame["joint_schema"].dropna().astype(str))
@@ -100,21 +124,29 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
             raise ValueError(
                 f"Manifest joint_schema values {sorted(schema_names)} do not match {self.schema.name!r}"
             )
-        rows = frame.to_dict("records") * repeats
-        random.Random(shuffle_seed).shuffle(rows)
-        source_row_count = len(rows)
-        if force_divisible_by > 1 and len(rows) % force_divisible_by:
-            if pad_to_divisible:
-                padding = force_divisible_by - len(rows) % force_divisible_by
-                rows.extend(rows[index % len(rows)] for index in range(padding))
-            else:
-                rows = rows[: len(rows) // force_divisible_by * force_divisible_by]
-        self.rows = rows[dp_rank::dp_world_size]
-        if not self.rows:
-            raise ValueError(f"No rows assigned to rank {dp_rank} from {manifest_path}")
+        self.records = frame.set_index("uuid").to_dict("index")
+        packed_path = Path(batches_packed)
+        opener = gzip.open if packed_path.suffix == ".gz" else open
+        with opener(packed_path, "rt", encoding="utf-8") as file:
+            batches = json.load(file)["batches"] * repeats
+        if force_divisible_by > 1:
+            batches = batches[: len(batches) // force_divisible_by * force_divisible_by]
+        if not batches:
+            raise ValueError(
+                f"No packed batches remain after enforcing divisibility by {force_divisible_by}"
+            )
+        missing = sorted(
+            {item[0] for packed_batch in batches for item in packed_batch} - self.records.keys()
+        )
+        if missing:
+            raise ValueError(f"Packed batches contain UUIDs absent from the manifest: {missing[:5]}")
+        self.batches = batches[dp_rank::dp_world_size]
+        random.Random(shuffle_seed).shuffle(self.batches)
+        if not self.batches:
+            raise ValueError(f"No packed batches assigned to rank {dp_rank}")
         logger.info(
             f"RiggedHumanoidJointOctreeDataset: manifest={manifest_path}, split={split}, "
-            f"source_rows={source_row_count}, rank_rows={len(self.rows)}, "
+            f"rank_batches={len(self.batches)}, "
             f"views={self.view_indices}, joints={len(self.schema.joints)}"
         )
 
@@ -134,7 +166,9 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
             uri = uri.removeprefix("file://")
         return io.BytesIO(Path(uri).read_bytes())
 
-    def _load_rig(self, row: dict[str, Any]) -> tuple[OctreeData, OctreeData]:
+    def _load_rig(
+        self, row: dict[str, Any], layer_id: int
+    ) -> tuple[OctreeData, JointOctreeData]:
         with np.load(self._read_uri(row["rig_npz_uri"]), allow_pickle=True) as rig:
             vertices = np.asarray(rig["vertices"], dtype=np.float32)
             joints = self.schema.select(
@@ -145,85 +179,134 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
         vertices, joints = _normalize_like_nexus(vertices, joints)
         mesh_points = np.unique(discretize(vertices, self.grid_size), axis=0)
         joint_points = discretize(joints, self.grid_size)
-        mesh_octree = build_octree_by_layer(
-            torch.from_numpy(mesh_points).long(), self.grid_size, self.max_depth
+        mesh_octree = build_octree_specific_layer(
+            torch.from_numpy(mesh_points).long(), layer_id, self.grid_size, self.max_depth
         )
-        joint_octree = build_joint_layers(
-            torch.from_numpy(joint_points).long(), self.grid_size, self.max_depth
+        joint_octree = build_joint_specific_layer(
+            torch.from_numpy(joint_points).long(), self.grid_size, layer_id
         )
         return mesh_octree, joint_octree
 
     def _load_image(self, uri: str) -> tuple[torch.Tensor, torch.Tensor]:
         image = Image.open(self._read_uri(uri)).convert("RGBA")
-        rgba = np.asarray(image, dtype=np.float32) / 255.0
-        alpha = rgba[..., 3]
-        foreground = np.where(alpha > 0)
-        if foreground[0].size:
-            y0, y1 = foreground[0].min(), foreground[0].max() + 1
-            x0, x1 = foreground[1].min(), foreground[1].max() + 1
-            size = max(y1 - y0, x1 - x0)
-            margin = max(1, int(round(size * 0.05)))
-            cy, cx = (y0 + y1) // 2, (x0 + x1) // 2
-            half = size // 2 + margin
-            y0, y1 = max(0, cy - half), min(rgba.shape[0], cy + half)
-            x0, x1 = max(0, cx - half), min(rgba.shape[1], cx + half)
-            rgba = rgba[y0:y1, x0:x1]
-        rgb = rgba[..., :3] * rgba[..., 3:4] + 0.5 * (1.0 - rgba[..., 3:4])
-        rgb_image = Image.fromarray(np.round(rgb * 255).astype(np.uint8))
-        rgb_image = rgb_image.resize((self.image_resolution, self.image_resolution), Image.Resampling.LANCZOS)
-        image_tensor = torch.from_numpy(np.asarray(rgb_image, dtype=np.float32) / 255.0).permute(2, 0, 1)
-        mask_image = Image.fromarray(np.round(rgba[..., 3] * 255).astype(np.uint8))
+        image_np = np.asarray(image, dtype=np.float32) / 255.0
+        mask = image_np[..., 3]
+        pixels_y, pixels_x = np.where(mask > 0)
+
+        if len(pixels_y) > 0:
+            height, width = mask.shape
+            h0, h1 = max(pixels_y.min() - 1, 0), min(pixels_y.max() + 1, height)
+            w0, w1 = max(pixels_x.min() - 1, 0), min(pixels_x.max() + 1, width)
+            crop_h0, crop_h1, crop_w0, crop_w1 = (
+                np.random.random(4) < 0.05
+            ).tolist()
+            height_fg, width_fg = h1 - h0, w1 - w0
+            crop_h0_pixels, crop_h1_pixels = (
+                np.random.random(2) * height_fg * 0.02
+            ).astype(np.int32).tolist()
+            crop_w0_pixels, crop_w1_pixels = (
+                np.random.random(2) * width_fg * 0.02
+            ).astype(np.int32).tolist()
+            if crop_h0:
+                h0 += crop_h0_pixels
+            if crop_h1:
+                h1 -= crop_h1_pixels
+            if crop_w0:
+                w0 += crop_w0_pixels
+            if crop_w1:
+                w1 -= crop_w1_pixels
+
+            height_fg, width_fg = h1 - h0, w1 - w0
+            pad_ratio = random.uniform(0.05, 0.2)
+            size_padded = int(max(height_fg, width_fg) / (1 - pad_ratio))
+            padded = np.zeros((size_padded, size_padded, 4), dtype=np.float32)
+            start_h = (size_padded - height_fg) // 2
+            start_w = (size_padded - width_fg) // 2
+            padded[start_h : start_h + height_fg, start_w : start_w + width_fg] = image_np[
+                h0:h1, w0:w1
+            ]
+            image_np = padded
+            mask = image_np[..., 3] > 0
+
+            foreground_gray = image_np[..., :3][image_np[..., 3] > 0].mean()
+            background = np.random.rand(1)
+            while foreground_gray - 0.2 < background < foreground_gray + 0.2:
+                background = np.random.rand(1)
+            background = np.repeat(background, 3)
+            image_np = (
+                image_np[..., :3] * image_np[..., 3:4]
+                + background[None, None] * (1 - image_np[..., 3:4])
+            )
+        else:
+            image_np = np.zeros_like(image_np[..., :3])
+            mask = np.zeros(mask.shape, dtype=bool)
+
+        rgb_image = Image.fromarray((image_np * 255).clip(0, 255).astype(np.uint8))
+        mask_image = Image.fromarray(mask.astype(np.uint8) * 255)
+        rgb_image = rgb_image.resize(
+            (self.image_resolution, self.image_resolution), Image.Resampling.LANCZOS
+        )
         mask_image = mask_image.resize((self.image_resolution, self.image_resolution), Image.Resampling.NEAREST)
+        rgb_image = self.transform(rgb_image)
+        image_tensor = torch.from_numpy(
+            np.asarray(rgb_image, dtype=np.float32) / 255.0
+        ).permute(2, 0, 1)
         mask_tensor = torch.from_numpy(np.asarray(mask_image) > 0)
         return image_tensor.contiguous(), mask_tensor
 
-    def get_data(self, row: dict[str, Any]) -> dict[str, Any]:
-        mesh_octree, joint_octree = self._load_rig(row)
+    def get_data(self, instance_id: str, layer_id: int) -> dict[str, Any]:
+        row = self.records[instance_id]
+        mesh_octree, joint_octree = self._load_rig(row, layer_id)
         images, masks = zip(
             *(self._load_image(row[f"color_view_{index}_uri"]) for index in self.view_indices)
         )
         image_tensor = torch.stack(images)
-        if self.drop_image_rate > 0 and random.random() < self.drop_image_rate:
+        if self.drop_image_rate > 0 and rand_with_pt([0, 1]) < self.drop_image_rate:
             image_tensor = torch.full_like(image_tensor, 0.5)
         return {
-            "instance_id": str(row["uuid"]),
+            "instance_id": instance_id,
             "mesh_octree": mesh_octree,
             "joint_octree": joint_octree,
             "images": image_tensor,
             "image_masks": torch.stack(masks),
             "view_indices": torch.tensor(self.view_indices, dtype=torch.long),
+            "num_vertices": int(row["num_vertices"]),
         }
 
     def __iter__(self):
         while True:
-            row = self.rows[self.sample_idx % len(self.rows)]
-            last_error = None
-            for _ in range(self.max_sample_retries):
+            sample_idx = self.sample_idx
+            while True:
                 try:
-                    yield self.get_data(row)
-                    last_error = None
+                    yield [
+                        self.get_data(instance_id, layer_id)
+                        for instance_id, _sample_id, layer_id in self.batches[sample_idx]
+                    ]
                     break
                 except GeneratorExit:
                     raise
-                except Exception as error:
-                    last_error = error
-                    logger.warning(f"Failed humanoid sample {row['uuid']}: {error}")
-            if last_error is not None:
-                raise RuntimeError(f"Failed humanoid sample {row['uuid']}") from last_error
+                except Exception:
+                    logger.warning(
+                        "Failed humanoid packed batch %s: %s",
+                        self.batches[sample_idx],
+                        traceback.format_exc(),
+                    )
+                    sample_idx = random.randrange(len(self.batches))
             self.sample_idx += 1
-            if self.sample_idx >= len(self.rows):
+            if self.sample_idx >= len(self.batches):
                 if not self.infinite:
                     return
                 self.sample_idx = 0
 
     def state_dict(self):
-        return {"sample_idx": self.sample_idx, "rows": self.rows}
+        return {"sample_idx": self.sample_idx, "batches": self.batches}
 
     def load_state_dict(self, state_dict):
         self.sample_idx = state_dict["sample_idx"]
-        self.rows = state_dict["rows"]
+        self.batches = state_dict["batches"]
 
     def collate_fn(self, batch: list[dict[str, Any]]) -> JointOctreeBatch:
+        batch = [item for packed_batch in batch for item in packed_batch]
         occupancies, centers, depths = [], [], []
         joint_ids, joint_masks, sequence_lengths, instance_ids = [], [], [], []
         layers_per_mesh = []
@@ -242,7 +325,8 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
                 )
                 count_mesh = mesh_occupancy.shape[0]
                 count_joints = joint_occupancy.shape[0]
-                depths.append(torch.full((count_mesh + count_joints,), layer_index, dtype=torch.long))
+                depth = mesh.layer_depths[layer_index]
+                depths.append(torch.full((count_mesh + count_joints,), depth, dtype=torch.long))
                 joint_ids.append(
                     torch.cat(
                         [torch.full((count_mesh,), -1), torch.arange(count_joints, dtype=torch.long)]
@@ -276,7 +360,7 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
             image_masks=torch.cat([sample["image_masks"] for sample in batch]),
             uncond_images=torch.full_like(images, 0.5),
             num_vertices=torch.tensor(
-                [sample["mesh_octree"].num_vertices for sample in batch], dtype=torch.int32
+                [sample["num_vertices"] for sample in batch], dtype=torch.int32
             ),
             view_indices=torch.cat([sample["view_indices"] for sample in batch]),
             mv_cu_seqlens=mv_cu_seqlens,

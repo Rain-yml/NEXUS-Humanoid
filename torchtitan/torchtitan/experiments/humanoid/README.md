@@ -3,8 +3,8 @@
 This package owns the humanoid-specific NEXUS path. Files that alter upstream
 behavior are local copies, not subclasses or monkey patches.
 
-- `data`: SSOT Parquet loading, BOS access, canonical semantics, and combined
-  mesh/joint octree batches.
+- `data`: SSOT Parquet loading, BOS access, NEXUS-compatible layer packing,
+  canonical semantics, and combined mesh/joint octree batches.
 - `models`: copied NEXUS octree DiT with semantic joint-token inputs.
 - `pipelines`: copied layerwise inference with one-child joint traversal.
 - `trainer.py`: copied flow-matching trainer with separate mesh/joint averages.
