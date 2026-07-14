@@ -100,6 +100,12 @@ data_parallel_shard_degree = -1
 context_parallel_degree = 1
 enable_compiled_autograd = true
 
+[comm]
+# Individual assets have different octree token counts, so FSDP ranks can reach
+# the next collective several minutes apart on the 5B model.
+init_timeout_seconds = 1800
+train_timeout_seconds = 1800
+
 [experimental]
 custom_args_module = "torchtitan.experiments.humanoid.arguments"
 
