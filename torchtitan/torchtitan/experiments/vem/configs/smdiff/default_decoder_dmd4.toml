@@ -1,0 +1,127 @@
+[job]
+dump_folder = "./outputs/vem2"
+description = "vem vdit model"
+print_args = true
+
+[profiling]
+enable_profiling = false
+save_traces_folder = "profile_trace"
+profile_freq = 10
+enable_memory_snapshot = false
+save_memory_snapshot_folder = "memory_snapshot"
+
+[metrics]
+log_freq = 1
+disable_color_printing = false
+enable_tensorboard = true
+save_tb_folder = "tb"
+enable_wandb = true 
+
+[model]
+name = "dmd_smgen"
+flavor = "2B-image-dinov3-24dim-rope"
+
+[optimizer]
+name = "AdamW"
+lr = 1e-4
+weight_decay = 0.01
+betas = [0.9, 0.99]
+
+[lr_scheduler]
+warmup_steps = 0 # warmup steps
+decay_ratio = 0.0  # no decay, stay stable during training
+
+[training]
+batch_size = 8
+max_norm = 1.0  # grad norm clipping
+steps = 100000
+dataset = "smgen-rgb"
+mixed_precision_param = "bfloat16"
+mixed_precision_reduce = "float32"
+compile = true
+seed = 42
+num_workers = 15
+pin_memory = true
+drop_last = false
+fsdp_cast_forward_inputs = false
+encoder_flavor = ""
+encoder_pretrain_path = "xxxx"
+mean_std_path = "xxxx"
+image_encoder_type = "dinov2"
+image_encoder_model = "facebook/dinov2-with-registers-large"
+image_encoder_return_the_nth_hidden_states = -1
+
+[training.dataset_kwargs]
+instance_list = [
+    "xxxx"
+]
+repeats = 1
+shuffle_seed = 42
+use_bos = true
+bos_bucket = "xxxx"
+image_bucket = "xxxx"
+yup_to_zup = false
+vertex_noise = 0.0
+image_resolution = 518
+drop_image_rate = 0.0
+num_face_range = [0, 20000]
+num_vertex_range = [0, 100000]
+infinite = true
+vertex_resolution = -1
+vertex_position_type = 'float'
+extra_feat = 'none'
+alignment = 'none'
+
+[scheduler]
+t_sampling_scheme = "logit_normal"
+logit_mean = 0.0
+logit_std = 1.0
+uniform_ratio = 0.0
+uniform_power = 1.0
+uniform_min = 0.0
+uniform_max = 1.0
+num_train_timesteps = 1000
+noise_std = 1.0
+dynamic_shift = false
+shift_base = 256
+
+[parallelism]
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1
+context_parallel_degree = 1
+enable_compiled_autograd = true
+
+[experimental]
+custom_args_module = "torchtitan.experiments.vem.extra_args_smgen"
+
+[checkpoint]
+enable_checkpoint = true
+folder = "ckpts"
+interval = 500
+model_weights_only = false
+keep_latest_k = 2 # keep all checkpoints
+load_step = -1 # automatic loading
+
+[activation_checkpoint]
+mode = "none"
+# mode = "selective"  # ["none", "selective", "full"]
+selective_ac_option = 3  # "int" = ac every positive int layer or 'op', ac based on ops policy
+
+[memory_estimation]
+enabled = false
+
+[ema]
+enabled = false
+beta = 0.9999
+update_after_step = 100
+update_every = 10
+inv_gamma = 1.0
+power = 1.0
+min_value = 0.0
+
+[distill]
+guidance_scale = 2.5
+student_update_freq = 4
+student_cfg_steps = 0  # CFG distill for first N steps (every iter), 0 = disabled
+student_sample_steps = 4  # 1 = single-step, >1 = multi-step distillation
+student_t_shift = 1.0

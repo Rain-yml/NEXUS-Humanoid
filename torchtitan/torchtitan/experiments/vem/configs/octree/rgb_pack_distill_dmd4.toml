@@ -1,0 +1,125 @@
+[job]
+dump_folder = "./outputs/octree_diff"
+description = "octree diffusion model"
+print_args = true
+
+[profiling]
+enable_profiling = false
+save_traces_folder = "profile_trace"
+profile_freq = 10
+enable_memory_snapshot = false
+save_memory_snapshot_folder = "memory_snapshot"
+
+[metrics]
+log_freq = 1
+disable_color_printing = false
+enable_tensorboard = true
+save_tb_folder = "tb"
+enable_wandb = true 
+
+[model]
+name = "dmd_octdiff"
+flavor = "grid512-5B"
+
+[optimizer]
+name = "AdamW"
+lr = 1e-5
+weight_decay = 0.01
+betas = [0.9, 0.99]
+
+[lr_scheduler]
+warmup_steps = 0
+decay_ratio = 0.0  # no decay, stay stable during training
+
+[training]
+batch_size = 2
+max_norm = 1.0
+steps = 100000
+dataset = "vertex-rgb-pack"
+mixed_precision_param = "bfloat16"
+mixed_precision_reduce = "float32"
+compile = true
+seed = 42
+num_workers = 15
+pin_memory = true
+drop_last = false
+fsdp_cast_forward_inputs = false
+image_encoder_type = "dinov3"  # 图像编码器类型
+image_encoder_model = "/mnt/pfs/share/pretrained_model/DINOv3/dinov3-vith16plus-pretrain-lvd1689m"
+loss_type = "xpred-vloss"
+
+[training.dataset_kwargs]
+batches_packed = '/mnt/pfs/users/liuyingtian/NEXUS/torchtitan/.cache/data_list/pack/v24_11k_f48_20k_oct_nv_ffd.json.gz'
+repeats = 1
+shuffle_seed = 42
+use_bos = true  # 从 BOS 读取实际的 ply 文件
+use_cos = false
+bos_bucket = "mesh-data-resave-ply-flip-normal"
+image_bucket = "mesh-data-shapediff-render"
+grid_size = 512
+max_depth = 9
+yup_to_zup = false
+cache_instances = false
+# num_face_range = [48, 8000]
+# num_vertex_range = [0, 100000]
+infinite = true
+# 图像条件配置
+image_resolution = 512  # DINOv3 使用 512x512
+drop_image_rate = 0.0  # 10% 概率 drop 图像 (用于 CFG)
+alignment = 'near_align'
+
+[distill]
+guidance_scale = 9.0
+student_update_freq = 4
+student_cfg_steps = 0  # CFG distill for first N steps (every iter), 0 = disabled
+student_sample_steps = 4  # 1 = single-step, >1 = multi-step distillation
+student_t_shift = 1.0  # timestep shift factor, 1.0 = no shift
+
+[scheduler]
+t_sampling_scheme = "logit_normal"
+logit_mean = 0.0
+logit_std = 1.0
+uniform_ratio = 0.0
+uniform_power = 1.0
+uniform_min = 0.0
+uniform_max = 1.0
+num_train_timesteps = 1000
+noise_std = 1.0
+# CFG (Classifier-Free Guidance) - 训练时 drop condition 的概率
+# 设为 0.0 表示不使用 CFG，推荐值 0.1
+cfg_drop_prob = 0.0
+
+[parallelism]
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1
+context_parallel_degree = 1
+enable_compiled_autograd = true
+
+[experimental]
+custom_args_module = "torchtitan.experiments.vem.extra_args_octdiff"
+
+[checkpoint]
+enable_checkpoint = true
+folder = "ckpts"
+interval = 1000
+model_weights_only = true
+keep_latest_k = 3
+load_step = -1
+persistent_steps = [5000, 10000, 15000, 20000]
+exclude_from_loading = ["optimizer", "dataloader"]
+
+[activation_checkpoint]
+mode = "selective"
+selective_ac_option = "op"
+
+[memory_estimation]
+enabled = false
+
+[ema]
+enabled = true
+beta = 0.9999
+update_after_step = 0
+update_every = 1
+inv_gamma = 1.0
+power = 1.0
+min_value = 0.0

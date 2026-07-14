@@ -1,0 +1,35 @@
+torchdata
+/mnt/pfs/share/wheels/datasets-3.5.2.dev0-py3-none-any.whl
+tomli
+toml
+tensorboard
+tiktoken
+blobfile
+tabulate
+wandb
+fsspec
+tyro
+diffusers
+transformers==4.57.3
+/mnt/pfs/share/wheels/py312-cu128-torch270/flash_attn_3-3.0.0b1-cp312-cp312-linux_x86_64.whl
+/mnt/pfs/share/wheels/py312-cu128-torch270/torchsparse-2.1.0-cp312-cp312-linux_x86_64.whl
+/mnt/pfs/share/wheels/py312-cu128-torch270/fvdb-0.2.1-cp312-cp312-linux_x86_64.whl
+line_profiler
+bce-python-sdk
+nvitop
+mup
+easydict
+/mnt/pfs/share/wheels/diffoctreerast-0.0.0-cp312-cp312-linux_x86_64.whl
+/mnt/pfs/share/wheels/utils3d-0.0.2-py3-none-any.whl
+/mnt/pfs/share/wheels/nvdiffrast-0.3.3-py3-none-any.whl
+/mnt/pfs/share/wheels/py312-cu128-torch270/torch_cluster-1.6.3+pt27cu128-cp312-cp312-linux_x86_64.whl
+trimesh==4.4.9
+accelerate
+nvitop
+pyrr
+moderngl[headless]
+meshio
+/mnt/pfs/share/wheels/py312-cu128-torch270/liger_kernel-0.6.2-py3-none-any.whl  
+# pyrender
+# pyopengl-accelerate
+# liger-kernel

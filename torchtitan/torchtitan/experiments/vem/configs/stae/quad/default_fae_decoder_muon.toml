@@ -1,0 +1,119 @@
+[job]
+dump_folder = "./outputs/vem2_stae"
+description = "vem debug model"
+print_args = true
+
+[profiling]
+enable_profiling = false
+save_traces_folder = "profile_trace"
+profile_freq = 10
+enable_memory_snapshot = false
+save_memory_snapshot_folder = "memory_snapshot"
+
+[metrics]
+log_freq = 1
+disable_color_printing = false
+enable_tensorboard = true
+save_tb_folder = "tb"
+enable_wandb = true
+
+[model]
+name = "mesh_quadvae"
+flavor = "base-decoder-16-face0.6-ab-orient-12-kl-zerorope-nobias-res2048"
+
+[optimizer]
+name = "Muon"
+lr = 2e-2
+weight_decay = 0.01
+betas = [0.9, 0.95]
+
+# Muon-specific parameters
+mu = 0.95                     # Momentum factor for Muon
+algorithm = "muon"           # Main algorithm to use for 2D matrices
+nesterov = false             # Whether to use Nesterov momentum
+adjust_lr = "rms_norm"  # How to adjust LR: "spectral_norm", "rms_norm", or null
+flatten = false              # Whether to flatten 3D+ tensors to 2D
+use_triton = true           # Whether to use Triton kernel for Newton-Schulz
+
+# Parameter-specific optimizer selection
+scalar_optimizer = "adamw"        # For 1D parameters (biases, layer norms)
+embedding_optimizer = "adamw"     # For embedding layers
+head_optimizer = "adamw"          # For model head/output layers
+routing_optimizer = "adamw"       # For routing layers (DeepSeek MoE)
+head_lr_scaling = true            # Apply 1/sqrt(dim) scaling to head layers
+expert_optimizer = "adamw"        # All expert weights will use AdamW
+
+# Learning rate scaling factors
+scalar_lr_factor = 1.0            # LR multiplier for scalar parameters
+embedding_lr_factor = 1.0         # LR multiplier for embedding parameters
+head_lr_factor = 1.0              # LR multiplier for head parameters (after head_lr_scaling)
+routing_lr_factor = 1.0           # LR multiplier for routing parameters
+
+[lr_scheduler]
+warmup_steps = 500  # warmup steps
+decay_ratio = 0.2  # no decay, stay stable during training
+
+[training]
+batch_size = 8
+max_norm = 1.0  # grad norm clipping
+steps = 12000
+dataset = "stae-quad"
+mixed_precision_param = "bfloat16"
+mixed_precision_reduce = "float32"
+compile = true
+seed = 42
+num_workers = 15
+fsdp_cast_forward_inputs = false
+
+[training.dataset_kwargs]
+instance_list = 'xxx'
+repeats = 1
+shuffle_seed = 42
+aug_flip = true
+aug_rotate_all = true
+aug_rotate_z = false
+aug_scale = true
+aug_scale_range = [0.8, 1.2]
+vertex_noise = 0.0
+vertex_resolutions = [2048]
+include_face = true
+include_face_orient = true
+extra_feat = 'face_normal'
+infinite = true 
+vertex_position_type = 'int'
+face_negative = 'random'
+mode = "tri_connect"
+
+[parallelism]
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1
+context_parallel_degree = 1
+enable_compiled_autograd = false
+
+[experimental]
+custom_args_module = "torchtitan.experiments.vem.extra_args_stae"
+
+[checkpoint]
+enable_checkpoint = true
+folder = "ckpts"
+interval = 200
+model_weights_only = false
+keep_latest_k = 2 # keep all checkpoints
+load_step = -1 # automatic loading
+
+[activation_checkpoint]
+# mode = "full"
+mode = "selective"  # ["none", "selective", "full"]
+selective_ac_option = "op"  # "int" = ac every positive int layer or 'op', ac based on ops policy
+
+[memory_estimation]
+enabled = false
+
+[ema]
+enabled = false
+beta = 0.9999
+update_after_step = 100
+update_every = 10
+inv_gamma = 1.0
+power = 1.0
+min_value = 0.0
