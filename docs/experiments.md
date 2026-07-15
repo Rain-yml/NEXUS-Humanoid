@@ -23,9 +23,16 @@ data-parallel count, so the unchanged NEXUS loader does not discard a tail.
 
 The checkpoint-sensitive optimizer, flow target, compile, activation
 checkpointing, and EMA settings match the recorded NEXUS 5B MV run. Future
-experiments must provide both an SSOT Parquet manifest and a NEXUS-format
-packed-batch JSON; they should be copied from this config and change only the
-manifest, packing, run length, checkpoint cadence, and output folder.
+production experiments provide only an SSOT Parquet manifest. The loader
+deterministically enumerates all nine octree layers, rejects meshes above 11k
+merged/discretized vertices at runtime, and emits one sequence per rank. No
+geometry-derived packing metadata is stored in the manifest.
+
+`dual_branch/front_qem20k_vroid_train10k.toml` is the production front-view
+experiment. Its manifest keeps all non-VRoid assets, caps only the training
+VRoid population at 10,000, and leaves validation and test untouched. It runs
+for 100,000 steps on eight ranks, saves every 1,000 steps, and retains the latest
+three checkpoints.
 
 To build a QEM smoke manifest in an environment with BOS access:
 

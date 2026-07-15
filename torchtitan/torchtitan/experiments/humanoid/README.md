@@ -3,7 +3,7 @@
 This package owns the humanoid-specific NEXUS path. Files that alter upstream
 behavior are local copies, not subclasses or monkey patches.
 
-- `data`: SSOT Parquet loading, BOS access, NEXUS-compatible layer packing,
+- `data`: SSOT Parquet loading, BOS access, runtime NEXUS octree construction,
   canonical semantics, and combined mesh/joint octree batches.
 - `models`: copied NEXUS octree DiT with semantic joint-token inputs.
 - `pipelines`: copied layerwise inference with one-child joint traversal.
@@ -14,20 +14,21 @@ behavior are local copies, not subclasses or monkey patches.
   `joint_attend_mesh` adapter; the mesh stream never attends to joints and is
   excluded from the loss and optimizer.
 - `train_spec.py`: explicit GPU-side registration, imported only by training.
-- `configs/dual_branch`: overfit and smoke-100 records for the dual-branch path.
+- `configs/dual_branch`: production and historical smoke records for the
+  dual-branch path.
 
-The dual-branch data path reuses the existing combined packed batch and splits
-it immediately before noising. Mesh and joints receive independent noise at the
-same per-layer timestep. Semantic joint IDs and one-child-per-depth trajectories
-are unchanged. The smoke pack caps layer sequences at eight, and its joint MSE
-is scaled by the actual sequence count over that capacity so every asset-depth
-pair has equal weight across optimizer steps.
+The production dual-branch data path enumerates one `(asset, octree layer)`
+sequence per rank directly from the Parquet manifest. It applies the pretrained
+model's 11k limit after NEXUS discretization and vertex merging, then splits the
+combined batch immediately before noising. Mesh and joints receive independent
+noise at the same per-layer timestep. With one fixed-size joint sequence per
+rank, the ordinary token mean is also the exact distributed token mean.
 
 ```bash
 torchrun --nproc-per-node=8 \
   -m torchtitan.experiments.humanoid.dual_branch_trainer \
   --job.config_file \
-  torchtitan/experiments/humanoid/configs/dual_branch/front_qem20k_smoke100.toml
+  torchtitan/experiments/humanoid/configs/dual_branch/front_qem20k_vroid_train10k.toml
 ```
 
 `scripts/humanoid/dual_branch_i2v_v2f_validate.py` rolls out both stage-1

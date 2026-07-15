@@ -630,21 +630,9 @@ class DiffusionTrainer(torch.distributed.checkpoint.stateful.Stateful):
                 f"Loss type {self.job_config.training.loss_type} not implemented"
             )
 
-        joint_mse = (joint_v_pred.float() - joint_target.float()).square().mean()
+        joint_loss = (joint_v_pred.float() - joint_target.float()).square().mean()
+        joint_mse = joint_loss
         joint_sequence_count = joints.cu_seqlens.numel() - 1
-        sequence_capacity = self.job_config.training.joint_loss_sequence_capacity
-        if sequence_capacity > 0 and joint_sequence_count > sequence_capacity:
-            raise ValueError(
-                f"Packed batch has {joint_sequence_count} joint sequences, above the "
-                f"configured capacity {sequence_capacity:g}"
-            )
-        # Mesh-token packing changes the number of fixed-length joint sequences per
-        # step. A fixed denominator keeps every asset-depth sequence equally weighted.
-        joint_loss = joint_mse * (
-            joint_sequence_count / sequence_capacity
-            if sequence_capacity > 0
-            else 1.0
-        )
         mesh_loss = (mesh_v_pred.float() - mesh_target.float()).square().mean().detach()
         joint_loss.backward()
 

@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import gc
-import gzip
 import io
-import json
 import random
 import traceback
 from dataclasses import dataclass
@@ -55,6 +53,10 @@ class NormalizedHumanoidRig:
     joints: np.ndarray
     mesh_points: torch.Tensor
     joint_points: torch.Tensor
+
+
+class OversizedHumanoidRigError(ValueError):
+    pass
 
 
 def _normalize_like_nexus(vertices: np.ndarray, joints: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -165,12 +167,11 @@ def preprocess_humanoid_image(
 class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
     """Load mesh, canonical joints, and four views from an SSOT Parquet manifest."""
 
-    worker_shard_data = ["batches"]
+    worker_shard_data = ["items"]
 
     def __init__(
         self,
         manifest_path: str,
-        batches_packed: str,
         joint_schema_path: str,
         split: str = "train",
         repeats: int = 1,
@@ -181,7 +182,7 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
         view_indices: list[int] | None = None,
         drop_image_rate: float = 0.1,
         infinite: bool = True,
-        force_divisible_by: int = 1,
+        max_merged_vertices: int = 11_000,
         dp_rank: int = 0,
         dp_world_size: int = 1,
     ) -> None:
@@ -199,6 +200,9 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
             raise ValueError(f"view_indices must not contain duplicates: {view_indices}")
         self.drop_image_rate = drop_image_rate
         self.infinite = infinite
+        if max_merged_vertices < 1:
+            raise ValueError("max_merged_vertices must be positive")
+        self.max_merged_vertices = max_merged_vertices
         self.sample_idx = 0
         self._bos_client = None
 
@@ -211,29 +215,20 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
                 f"Manifest joint_schema values {sorted(schema_names)} do not match {self.schema.name!r}"
             )
         self.records = frame.set_index("uuid").to_dict("index")
-        packed_path = Path(batches_packed)
-        opener = gzip.open if packed_path.suffix == ".gz" else open
-        with opener(packed_path, "rt", encoding="utf-8") as file:
-            batches = json.load(file)["batches"] * repeats
-        if force_divisible_by > 1:
-            batches = batches[: len(batches) // force_divisible_by * force_divisible_by]
-        if not batches:
-            raise ValueError(
-                f"No packed batches remain after enforcing divisibility by {force_divisible_by}"
-            )
-        missing = sorted(
-            {item[0] for packed_batch in batches for item in packed_batch} - self.records.keys()
-        )
-        if missing:
-            raise ValueError(f"Packed batches contain UUIDs absent from the manifest: {missing[:5]}")
-        self.batches = batches[dp_rank::dp_world_size]
-        random.Random(shuffle_seed).shuffle(self.batches)
-        if not self.batches:
-            raise ValueError(f"No packed batches assigned to rank {dp_rank}")
+        items = [
+            (uuid, layer_id)
+            for uuid in self.records
+            for layer_id in range(self.max_depth)
+        ] * repeats
+        self.items = items[dp_rank::dp_world_size]
+        random.Random(shuffle_seed).shuffle(self.items)
+        if not self.items:
+            raise ValueError(f"No samples assigned to rank {dp_rank}")
         logger.info(
             f"RiggedHumanoidJointOctreeDataset: manifest={manifest_path}, split={split}, "
-            f"rank_batches={len(self.batches)}, "
-            f"views={self.view_indices}, joints={len(self.schema.joints)}"
+            f"rank_items={len(self.items)}, views={self.view_indices}, "
+            f"joints={len(self.schema.joints)}, "
+            f"max_merged_vertices={self.max_merged_vertices}"
         )
 
     @property
@@ -262,6 +257,11 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
             )
         vertices, joints = _normalize_like_nexus(vertices, joints)
         mesh_points = np.unique(discretize(vertices, self.grid_size), axis=0)
+        if len(mesh_points) > self.max_merged_vertices:
+            raise OversizedHumanoidRigError(
+                f"Merged vertex count {len(mesh_points)} exceeds "
+                f"max_merged_vertices={self.max_merged_vertices}"
+            )
         joint_points = discretize(joints, self.grid_size)
         return NormalizedHumanoidRig(
             vertices=vertices,
@@ -320,40 +320,39 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
             "images": image_tensor,
             "image_masks": torch.stack(masks),
             "view_indices": torch.tensor(self.view_indices, dtype=torch.long),
-            "num_vertices": int(row["num_vertices"]),
+            "num_vertices": int(mesh_octree.num_vertices),
         }
 
     def __iter__(self):
         while True:
-            sample_idx = self.sample_idx
-            while True:
-                try:
-                    yield [
-                        self.get_data(instance_id, layer_id)
-                        for instance_id, _sample_id, layer_id in self.batches[sample_idx]
-                    ]
-                    break
-                except GeneratorExit:
-                    raise
-                except Exception:
-                    logger.warning(
-                        "Failed humanoid packed batch %s: %s",
-                        self.batches[sample_idx],
-                        traceback.format_exc(),
-                    )
-                    sample_idx = random.randrange(len(self.batches))
-            self.sample_idx += 1
-            if self.sample_idx >= len(self.batches):
-                if not self.infinite:
+            if self.sample_idx >= len(self.items):
+                if self.infinite:
+                    self.sample_idx = 0
+                else:
                     return
-                self.sample_idx = 0
+            item = self.items[self.sample_idx]
+            self.sample_idx += 1
+            try:
+                yield [self.get_data(*item)]
+            except GeneratorExit:
+                raise
+            except Exception:
+                logger.warning(
+                    "Failed humanoid sample %s: %s", item, traceback.format_exc()
+                )
+
+            if not self.infinite and self.sample_idx >= len(self.items):
+                return
 
     def state_dict(self):
-        return {"sample_idx": self.sample_idx, "batches": self.batches}
+        return {
+            "sample_idx": self.sample_idx,
+            "items": self.items,
+        }
 
     def load_state_dict(self, state_dict):
         self.sample_idx = state_dict["sample_idx"]
-        self.batches = state_dict["batches"]
+        self.items = state_dict["items"]
 
     def collate_fn(self, batch: list[dict[str, Any]]) -> JointOctreeBatch:
         batch = [item for packed_batch in batch for item in packed_batch]

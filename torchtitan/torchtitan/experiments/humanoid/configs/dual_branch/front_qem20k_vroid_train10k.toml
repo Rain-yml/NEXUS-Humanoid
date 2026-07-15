@@ -1,0 +1,159 @@
+[job]
+dump_folder = "./outputs/humanoid_dual_branch_front_qem20k_vroid_train10k"
+description = "Frozen-mesh dual-branch joint training on the production humanoid QEM20K dataset"
+print_args = true
+
+[profiling]
+enable_profiling = false
+save_traces_folder = "profile_trace"
+profile_freq = 10
+enable_memory_snapshot = false
+save_memory_snapshot_folder = "memory_snapshot"
+
+[metrics]
+log_freq = 1
+disable_color_printing = false
+enable_tensorboard = true
+save_tb_folder = "tb"
+enable_wandb = false
+
+[model]
+name = "humanoid-dual-branch-octree"
+flavor = "5b-mv"
+
+[optimizer]
+name = "Muon"
+lr = 1e-4
+weight_decay = 0.01
+betas = [0.9, 0.99]
+eps = 1e-8
+implementation = "fused"
+early_step_in_backward = false
+mu = 0.99
+algorithm = "muon"
+nesterov = false
+adjust_lr = "rms_norm"
+flatten = false
+use_triton = true
+scalar_optimizer = "adamw"
+embedding_optimizer = "adamw"
+head_optimizer = "adamw"
+routing_optimizer = "adamw"
+head_lr_scaling = true
+expert_optimizer = "adamw"
+scalar_lr_factor = 1.0
+embedding_lr_factor = 1.0
+head_lr_factor = 1.0
+routing_lr_factor = 1.0
+expert_lr_factor = 1.0
+
+[lr_scheduler]
+warmup_steps = 500
+decay_ratio = 0.0
+decay_type = "linear"
+lr_min = 0.0
+
+[training]
+batch_size = 1
+seq_len = 2048
+max_norm = 1.0
+steps = 100000
+dataset = "rigged-humanoid-joint-octree"
+mixed_precision_param = "bfloat16"
+mixed_precision_reduce = "float32"
+enable_cpu_offload = false
+compile = false
+gc_freq = 50
+seed = 42
+deterministic = false
+num_workers = 5
+pin_memory = true
+drop_last = false
+fsdp_cast_forward_inputs = false
+image_encoder_type = "dinov3"
+image_encoder_model = "/mnt/pfs/share/pretrained_model/DINOv3/dinov3-vith16plus-pretrain-lvd1689m"
+image_encoder_return_the_nth_hidden_states = -1
+use_foreground_condition_tokens = false
+foreground_condition_token_dilation = 0
+pretrained_path = "/mnt/pfs/users/liyumeng/checkpoints/nexus/octdiff_5B_xpred_vloss_v11000_bs256_na_muon_pack_mv/ckpts_bak/step-128000-emamodel.pth"
+loss_type = "xpred-vloss"
+
+[training.dataset_kwargs]
+manifest_path = "/mnt/pfs/users/liyumeng/data/rigged_humanoid/datasets/humanoid28_qem20k_vroid_train10k_v1.parquet"
+joint_schema_path = "torchtitan/experiments/humanoid/data/humanoid_28_v1.json"
+split = "train"
+repeats = 1
+shuffle_seed = 42
+grid_size = 512
+max_depth = 9
+infinite = true
+image_resolution = 512
+view_indices = [0]
+drop_image_rate = 0.2
+max_merged_vertices = 11000
+
+[scheduler]
+t_sampling_scheme = "logit_normal"
+logit_mean = 0.0
+logit_std = 1.0
+uniform_ratio = 0.0
+uniform_power = 1.0
+uniform_min = 0.0
+uniform_max = 1.0
+num_train_timesteps = 1000
+noise_std = 1.0
+
+[parallelism]
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1
+context_parallel_degree = 1
+enable_compiled_autograd = false
+fsdp_reshard_after_forward = "default"
+tensor_parallel_degree = 1
+disable_loss_parallel = false
+enable_async_tensor_parallel = false
+pipeline_parallel_degree = 1
+pipeline_parallel_split_points = []
+pipeline_parallel_schedule = "1F1B"
+pipeline_parallel_schedule_csv = ""
+pipeline_parallel_microbatch_size = 1
+context_parallel_rotate_method = "allgather"
+
+[comm]
+init_timeout_seconds = 600
+train_timeout_seconds = 600
+
+[experimental]
+custom_args_module = "torchtitan.experiments.humanoid.arguments"
+
+[checkpoint]
+enable_checkpoint = true
+folder = "ckpts"
+path_override = "./outputs/humanoid_dual_branch_front_qem20k_vroid_train10k/ckpts"
+load_path_override = ""
+load_model_exclude_keys = []
+interval = 1000
+model_weights_only = false
+export_dtype = "float32"
+create_seed_checkpoint = false
+async_mode = "async"
+keep_latest_k = 3
+load_step = -1
+exclude_from_loading = []
+persistent_steps = []
+
+[activation_checkpoint]
+mode = "selective"
+selective_ac_option = "0.7"
+
+[memory_estimation]
+enabled = false
+
+[ema]
+enabled = true
+beta = 0.9999
+update_after_step = 2000
+update_every = 1
+inv_gamma = 1.0
+power = 1.0
+min_value = 0.0
