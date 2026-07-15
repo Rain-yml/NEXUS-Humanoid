@@ -66,7 +66,7 @@ compile = false
 gc_freq = 50
 seed = 42
 deterministic = false
-num_workers = 15
+num_workers = 5
 pin_memory = true
 drop_last = false
 fsdp_cast_forward_inputs = false
@@ -77,6 +77,7 @@ use_foreground_condition_tokens = false
 foreground_condition_token_dilation = 0
 pretrained_path = "/mnt/pfs/users/liyumeng/checkpoints/nexus/octdiff_5B_xpred_vloss_v11000_bs256_na_muon_pack_mv/ckpts_bak/step-128000-emamodel.pth"
 loss_type = "xpred-vloss"
+joint_loss_sequence_capacity = 8
 
 [training.dataset_kwargs]
 manifest_path = "../manifests/humanoid_joint_octree/qem20k_smoke120_v1.parquet"

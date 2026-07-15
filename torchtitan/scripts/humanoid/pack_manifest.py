@@ -9,14 +9,24 @@ from pathlib import Path
 import pandas as pd
 
 
-def first_fit_decreasing(items: list[tuple[int, list]], budget: int) -> list[list[list]]:
+def first_fit_decreasing(
+    items: list[tuple[int, list]],
+    budget: int,
+    max_sequences_per_batch: int | None = None,
+) -> list[list[list]]:
+    if max_sequences_per_batch is not None and max_sequences_per_batch < 1:
+        raise ValueError("max_sequences_per_batch must be positive")
     bins: list[list[list]] = []
     remaining: list[int] = []
     for tokens, record in sorted(items, key=lambda item: (-item[0], item[1])):
         if tokens > budget:
             raise ValueError(f"Layer {record} has {tokens} tokens, above budget {budget}")
         for index, capacity in enumerate(remaining):
-            if tokens <= capacity:
+            has_sequence_capacity = (
+                max_sequences_per_batch is None
+                or len(bins[index]) < max_sequences_per_batch
+            )
+            if tokens <= capacity and has_sequence_capacity:
                 bins[index].append(record)
                 remaining[index] -= tokens
                 break
@@ -32,6 +42,7 @@ def main() -> None:
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--split", default="train", choices=("train", "val", "test"))
     parser.add_argument("--token-budget", required=True, type=int)
+    parser.add_argument("--max-sequences-per-batch", type=int, default=0)
     parser.add_argument("--pad-to-multiple", type=int, default=1)
     args = parser.parse_args()
 
@@ -50,7 +61,12 @@ def main() -> None:
         for layer_id, tokens in enumerate(layer_tokens):
             items.append((tokens, [str(row.uuid), int(sample_id), layer_id]))
 
-    batches = first_fit_decreasing(items, args.token_budget)
+    max_sequences_per_batch = args.max_sequences_per_batch or None
+    batches = first_fit_decreasing(
+        items,
+        args.token_budget,
+        max_sequences_per_batch=max_sequences_per_batch,
+    )
     original_batches = len(batches)
     if args.pad_to_multiple < 1:
         raise ValueError("--pad-to-multiple must be positive")
@@ -63,6 +79,7 @@ def main() -> None:
             "manifest": args.manifest.name,
             "split": args.split,
             "token_budget": args.token_budget,
+            "max_sequences_per_batch": max_sequences_per_batch,
             "source_layers": len(items),
             "original_batches": original_batches,
             "padded_batches": len(batches),

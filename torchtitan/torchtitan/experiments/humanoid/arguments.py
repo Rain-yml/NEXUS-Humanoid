@@ -28,6 +28,7 @@ class Training:
     use_foreground_condition_tokens: bool = False
     foreground_condition_token_dilation: int = 0
     loss_type: str = "vpred-vloss"
+    joint_loss_sequence_capacity: int = 0
     pretrained_path: Optional[str] = None
 
 @dataclass
