@@ -60,6 +60,100 @@ def _normalize_like_nexus(vertices: np.ndarray, joints: np.ndarray) -> tuple[np.
     return (vertices - center) * scale, (joints - center) * scale
 
 
+def build_humanoid_image_transform():
+    identity = transforms_v2.Lambda(lambda image: image)
+    return transforms_v2.Compose(
+        [
+            transforms_v2.RandomApply(
+                [
+                    transforms_v2.ColorJitter(hue=0.3),
+                    transforms_v2.RandomChoice(
+                        [transforms_v2.GaussianBlur(kernel_size=(3, 7)), identity]
+                    ),
+                    transforms_v2.RandomChoice(
+                        [transforms_v2.JPEG(quality=(20, 80)), identity]
+                    ),
+                ],
+                p=0.5,
+            )
+        ]
+    )
+
+
+def preprocess_humanoid_image(
+    image: Image.Image,
+    image_resolution: int,
+    transform,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Apply the image preprocessing shared by training and validation."""
+    image_np = np.asarray(image.convert("RGBA"), dtype=np.float32) / 255.0
+    mask = image_np[..., 3]
+    pixels_y, pixels_x = np.where(mask > 0)
+
+    if len(pixels_y) > 0:
+        height, width = mask.shape
+        h0, h1 = max(pixels_y.min() - 1, 0), min(pixels_y.max() + 1, height)
+        w0, w1 = max(pixels_x.min() - 1, 0), min(pixels_x.max() + 1, width)
+        crop_h0, crop_h1, crop_w0, crop_w1 = (
+            np.random.random(4) < 0.05
+        ).tolist()
+        height_fg, width_fg = h1 - h0, w1 - w0
+        crop_h0_pixels, crop_h1_pixels = (
+            np.random.random(2) * height_fg * 0.02
+        ).astype(np.int32).tolist()
+        crop_w0_pixels, crop_w1_pixels = (
+            np.random.random(2) * width_fg * 0.02
+        ).astype(np.int32).tolist()
+        if crop_h0:
+            h0 += crop_h0_pixels
+        if crop_h1:
+            h1 -= crop_h1_pixels
+        if crop_w0:
+            w0 += crop_w0_pixels
+        if crop_w1:
+            w1 -= crop_w1_pixels
+
+        height_fg, width_fg = h1 - h0, w1 - w0
+        pad_ratio = random.uniform(0.05, 0.2)
+        size_padded = int(max(height_fg, width_fg) / (1 - pad_ratio))
+        padded = np.zeros((size_padded, size_padded, 4), dtype=np.float32)
+        start_h = (size_padded - height_fg) // 2
+        start_w = (size_padded - width_fg) // 2
+        padded[start_h : start_h + height_fg, start_w : start_w + width_fg] = image_np[
+            h0:h1, w0:w1
+        ]
+        image_np = padded
+        mask = image_np[..., 3] > 0
+
+        foreground_gray = image_np[..., :3][image_np[..., 3] > 0].mean()
+        background = np.random.rand(1)
+        while foreground_gray - 0.2 < background < foreground_gray + 0.2:
+            background = np.random.rand(1)
+        background = np.repeat(background, 3)
+        image_np = (
+            image_np[..., :3] * image_np[..., 3:4]
+            + background[None, None] * (1 - image_np[..., 3:4])
+        )
+    else:
+        image_np = np.zeros_like(image_np[..., :3])
+        mask = np.zeros(mask.shape, dtype=bool)
+
+    rgb_image = Image.fromarray((image_np * 255).clip(0, 255).astype(np.uint8))
+    mask_image = Image.fromarray(mask.astype(np.uint8) * 255)
+    rgb_image = rgb_image.resize(
+        (image_resolution, image_resolution), Image.Resampling.LANCZOS
+    )
+    mask_image = mask_image.resize(
+        (image_resolution, image_resolution), Image.Resampling.NEAREST
+    )
+    rgb_image = transform(rgb_image)
+    image_tensor = torch.from_numpy(
+        np.asarray(rgb_image, dtype=np.float32) / 255.0
+    ).permute(2, 0, 1)
+    mask_tensor = torch.from_numpy(np.asarray(mask_image) > 0)
+    return image_tensor.contiguous(), mask_tensor
+
+
 class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
     """Load mesh, canonical joints, and four views from an SSOT Parquet manifest."""
 
@@ -100,23 +194,7 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
         self.sample_idx = 0
         self._bos_client = None
 
-        identity = transforms_v2.Lambda(lambda image: image)
-        self.transform = transforms_v2.Compose(
-            [
-                transforms_v2.RandomApply(
-                    [
-                        transforms_v2.ColorJitter(hue=0.3),
-                        transforms_v2.RandomChoice(
-                            [transforms_v2.GaussianBlur(kernel_size=(3, 7)), identity]
-                        ),
-                        transforms_v2.RandomChoice(
-                            [transforms_v2.JPEG(quality=(20, 80)), identity]
-                        ),
-                    ],
-                    p=0.5,
-                )
-            ]
-        )
+        self.transform = build_humanoid_image_transform()
 
         frame = read_manifest(manifest_path, split=split)
         schema_names = set(frame["joint_schema"].dropna().astype(str))
@@ -188,71 +266,8 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
         return mesh_octree, joint_octree
 
     def _load_image(self, uri: str) -> tuple[torch.Tensor, torch.Tensor]:
-        image = Image.open(self._read_uri(uri)).convert("RGBA")
-        image_np = np.asarray(image, dtype=np.float32) / 255.0
-        mask = image_np[..., 3]
-        pixels_y, pixels_x = np.where(mask > 0)
-
-        if len(pixels_y) > 0:
-            height, width = mask.shape
-            h0, h1 = max(pixels_y.min() - 1, 0), min(pixels_y.max() + 1, height)
-            w0, w1 = max(pixels_x.min() - 1, 0), min(pixels_x.max() + 1, width)
-            crop_h0, crop_h1, crop_w0, crop_w1 = (
-                np.random.random(4) < 0.05
-            ).tolist()
-            height_fg, width_fg = h1 - h0, w1 - w0
-            crop_h0_pixels, crop_h1_pixels = (
-                np.random.random(2) * height_fg * 0.02
-            ).astype(np.int32).tolist()
-            crop_w0_pixels, crop_w1_pixels = (
-                np.random.random(2) * width_fg * 0.02
-            ).astype(np.int32).tolist()
-            if crop_h0:
-                h0 += crop_h0_pixels
-            if crop_h1:
-                h1 -= crop_h1_pixels
-            if crop_w0:
-                w0 += crop_w0_pixels
-            if crop_w1:
-                w1 -= crop_w1_pixels
-
-            height_fg, width_fg = h1 - h0, w1 - w0
-            pad_ratio = random.uniform(0.05, 0.2)
-            size_padded = int(max(height_fg, width_fg) / (1 - pad_ratio))
-            padded = np.zeros((size_padded, size_padded, 4), dtype=np.float32)
-            start_h = (size_padded - height_fg) // 2
-            start_w = (size_padded - width_fg) // 2
-            padded[start_h : start_h + height_fg, start_w : start_w + width_fg] = image_np[
-                h0:h1, w0:w1
-            ]
-            image_np = padded
-            mask = image_np[..., 3] > 0
-
-            foreground_gray = image_np[..., :3][image_np[..., 3] > 0].mean()
-            background = np.random.rand(1)
-            while foreground_gray - 0.2 < background < foreground_gray + 0.2:
-                background = np.random.rand(1)
-            background = np.repeat(background, 3)
-            image_np = (
-                image_np[..., :3] * image_np[..., 3:4]
-                + background[None, None] * (1 - image_np[..., 3:4])
-            )
-        else:
-            image_np = np.zeros_like(image_np[..., :3])
-            mask = np.zeros(mask.shape, dtype=bool)
-
-        rgb_image = Image.fromarray((image_np * 255).clip(0, 255).astype(np.uint8))
-        mask_image = Image.fromarray(mask.astype(np.uint8) * 255)
-        rgb_image = rgb_image.resize(
-            (self.image_resolution, self.image_resolution), Image.Resampling.LANCZOS
-        )
-        mask_image = mask_image.resize((self.image_resolution, self.image_resolution), Image.Resampling.NEAREST)
-        rgb_image = self.transform(rgb_image)
-        image_tensor = torch.from_numpy(
-            np.asarray(rgb_image, dtype=np.float32) / 255.0
-        ).permute(2, 0, 1)
-        mask_tensor = torch.from_numpy(np.asarray(mask_image) > 0)
-        return image_tensor.contiguous(), mask_tensor
+        image = Image.open(self._read_uri(uri))
+        return preprocess_humanoid_image(image, self.image_resolution, self.transform)
 
     def get_data(self, instance_id: str, layer_id: int) -> dict[str, Any]:
         row = self.records[instance_id]

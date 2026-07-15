@@ -5,6 +5,7 @@ import argparse
 import io
 import json
 import math
+import random
 from dataclasses import dataclass
 from functools import partial
 from itertools import chain
@@ -36,6 +37,10 @@ from torchtitan.experiments.vem.datasets.octree_utils import (
     undiscretize,
 )
 from torchtitan.experiments.humanoid.data.bos import BOSClient
+from torchtitan.experiments.humanoid.data.dataset import (
+    build_humanoid_image_transform,
+    preprocess_humanoid_image,
+)
 from torchtitan.experiments.humanoid.data.manifest import parse_bos_uri
 from torchtitan.experiments.vem.image_encoder import (
     DINOv2ImageEncoder,
@@ -114,11 +119,13 @@ def read_uri(uri: str, bos_client: BOSClient) -> io.BytesIO:
 
 
 def load_condition_image(uri: str, image_size: int, bos_client: BOSClient) -> torch.Tensor:
-    image = Image.open(read_uri(uri, bos_client)).convert("RGBA")
-    image = image.resize((image_size, image_size), resample=Image.Resampling.BICUBIC)
-    image_np = np.asarray(image, dtype=np.float32) / 255.0
-    image_np = image_np[:, :, :3] * image_np[:, :, 3:4] + 0.5 * (1 - image_np[:, :, 3:4])
-    return torch.from_numpy(image_np).permute(2, 0, 1).clamp(0, 1).unsqueeze(0)
+    image = Image.open(read_uri(uri, bos_client))
+    image_tensor, _ = preprocess_humanoid_image(
+        image,
+        image_size,
+        build_humanoid_image_transform(),
+    )
+    return image_tensor.unsqueeze(0)
 
 
 def save_tensor_image(image: torch.Tensor, path: Path) -> None:
@@ -487,6 +494,8 @@ def main() -> int:
 
     device = torch.device(args.device)
     dtype = getattr(torch, args.dtype)
+    random.seed(args.seed)
+    np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     if device.type == "cuda" and device.index is not None:
         torch.cuda.set_device(device.index)
