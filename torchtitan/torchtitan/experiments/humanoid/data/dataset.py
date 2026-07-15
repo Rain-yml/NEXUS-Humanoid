@@ -49,6 +49,14 @@ class JointOctreeBatch(OctreeBatch):
         return JointOctreeBatch(**values)
 
 
+@dataclass
+class NormalizedHumanoidRig:
+    vertices: np.ndarray
+    joints: np.ndarray
+    mesh_points: torch.Tensor
+    joint_points: torch.Tensor
+
+
 def _normalize_like_nexus(vertices: np.ndarray, joints: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     minimum = vertices.min(axis=0)
     maximum = vertices.max(axis=0)
@@ -244,9 +252,7 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
             uri = uri.removeprefix("file://")
         return io.BytesIO(Path(uri).read_bytes())
 
-    def _load_rig(
-        self, row: dict[str, Any], layer_id: int
-    ) -> tuple[OctreeData, JointOctreeData]:
+    def _load_normalized_rig(self, row: dict[str, Any]) -> NormalizedHumanoidRig:
         with np.load(self._read_uri(row["rig_npz_uri"]), allow_pickle=True) as rig:
             vertices = np.asarray(rig["vertices"], dtype=np.float32)
             joints = self.schema.select(
@@ -257,13 +263,42 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
         vertices, joints = _normalize_like_nexus(vertices, joints)
         mesh_points = np.unique(discretize(vertices, self.grid_size), axis=0)
         joint_points = discretize(joints, self.grid_size)
+        return NormalizedHumanoidRig(
+            vertices=vertices,
+            joints=joints,
+            mesh_points=torch.from_numpy(mesh_points).long(),
+            joint_points=torch.from_numpy(joint_points).long(),
+        )
+
+    def _build_rig_layer(
+        self, rig: NormalizedHumanoidRig, layer_id: int
+    ) -> tuple[OctreeData, JointOctreeData]:
         mesh_octree = build_octree_specific_layer(
-            torch.from_numpy(mesh_points).long(), layer_id, self.grid_size, self.max_depth
+            rig.mesh_points, layer_id, self.grid_size, self.max_depth
         )
         joint_octree = build_joint_specific_layer(
-            torch.from_numpy(joint_points).long(), self.grid_size, layer_id
+            rig.joint_points, self.grid_size, layer_id
         )
         return mesh_octree, joint_octree
+
+    def _load_rig(
+        self, row: dict[str, Any], layer_id: int
+    ) -> tuple[OctreeData, JointOctreeData]:
+        return self._build_rig_layer(self._load_normalized_rig(row), layer_id)
+
+    def load_rig_layers_from_row(
+        self, row: dict[str, Any]
+    ) -> tuple[NormalizedHumanoidRig, list[OctreeData]]:
+        rig = self._load_normalized_rig(row)
+        mesh_layers = [
+            self._build_rig_layer(rig, depth)[0] for depth in range(self.max_depth)
+        ]
+        return rig, mesh_layers
+
+    def load_rig_layers(
+        self, instance_id: str
+    ) -> tuple[NormalizedHumanoidRig, list[OctreeData]]:
+        return self.load_rig_layers_from_row(self.records[instance_id])
 
     def _load_image(self, uri: str) -> tuple[torch.Tensor, torch.Tensor]:
         image = Image.open(self._read_uri(uri))

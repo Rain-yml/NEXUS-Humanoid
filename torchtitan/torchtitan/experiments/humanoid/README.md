@@ -32,6 +32,10 @@ torchrun --nproc-per-node=8 \
 
 `scripts/humanoid/dual_branch_i2v_v2f_validate.py` rolls out both stage-1
 streams and feeds the generated mesh points to the unchanged NEXUS stage 2.
+For the rigging task, `scripts/humanoid/dual_branch_teacher_forced_validate.py`
+instead loads every GT mesh-octree layer through the training dataset path,
+constructs its timestep-matched noisy state, discards mesh predictions, and
+denoises only the semantic joints.
 
 New architectural experiments should normally be sibling model or pipeline
 files with their own model flavor and TOML. Shared behavior should only be
