@@ -1257,6 +1257,14 @@ class DualBranchOctreeDiffusionModel(nn.Module):
     def config(self):
         return self.mesh_branch.config
 
+    @property
+    def dtype(self) -> torch.dtype:
+        return self.mesh_branch.dtype
+
+    @property
+    def device(self) -> torch.device:
+        return self.mesh_branch.device
+
     def freeze_mesh_branch(self) -> None:
         self.mesh_branch.requires_grad_(False)
         self.mesh_branch.eval()
