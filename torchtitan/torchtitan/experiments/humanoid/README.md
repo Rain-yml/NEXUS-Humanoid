@@ -9,8 +9,27 @@ behavior are local copies, not subclasses or monkey patches.
 - `pipelines`: copied layerwise inference with one-child joint traversal.
 - `trainer.py`: copied flow-matching trainer with the original token-average loss;
   mesh/joint averages are diagnostics only.
+- `dual_branch_trainer.py`: frozen pretrained mesh stream plus a trainable joint
+  stream. Each joint block updates through one zero-initialized
+  `joint_attend_mesh` adapter; the mesh stream never attends to joints and is
+  excluded from the loss and optimizer.
 - `train_spec.py`: explicit GPU-side registration, imported only by training.
-- `configs`: complete smoke, overfit, and production experiment records.
+- `configs/dual_branch`: overfit and smoke-100 records for the dual-branch path.
+
+The dual-branch data path reuses the existing combined packed batch and splits
+it immediately before noising. Mesh and joints receive independent noise at the
+same per-layer timestep. Semantic joint IDs and one-child-per-depth trajectories
+are unchanged.
+
+```bash
+torchrun --nproc-per-node=8 \
+  -m torchtitan.experiments.humanoid.dual_branch_trainer \
+  --job.config_file \
+  torchtitan/experiments/humanoid/configs/dual_branch/front_overfit.toml
+```
+
+`scripts/humanoid/dual_branch_i2v_v2f_validate.py` rolls out both stage-1
+streams and feeds the generated mesh points to the unchanged NEXUS stage 2.
 
 New architectural experiments should normally be sibling model or pipeline
 files with their own model flavor and TOML. Shared behavior should only be

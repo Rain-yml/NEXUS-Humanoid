@@ -1,9 +1,13 @@
 """Train-spec registration for standalone humanoid experiments."""
 
+from dataclasses import asdict
+
 from torchtitan.components.lr_scheduler import build_lr_schedulers
 from torchtitan.components.optimizer import build_optimizers
 from torchtitan.experiments.humanoid.data.dataloader import build_humanoid_dataloader
 from torchtitan.experiments.humanoid.models import (
+    DualBranchOctreeDiffusionArgs,
+    DualBranchOctreeDiffusionWrapper,
     JointOctreeDiffusionArgs,
     JointOctreeDiffusionWrapper,
 )
@@ -55,4 +59,24 @@ register_train_spec(
     )
 )
 
-__all__ = ["joint_octree_configs"]
+dual_branch_configs = {
+    flavor: DualBranchOctreeDiffusionArgs(**asdict(config))
+    for flavor, config in joint_octree_configs.items()
+}
+
+register_train_spec(
+    TrainSpec(
+        name="humanoid-dual-branch-octree",
+        cls=DualBranchOctreeDiffusionWrapper,
+        config=dual_branch_configs,
+        parallelize_fn=parallelize,
+        build_optimizers_fn=build_optimizers,
+        build_lr_schedulers_fn=build_lr_schedulers,
+        build_dataloader_fn=build_humanoid_dataloader,
+        build_tokenizer_fn=None,
+        build_loss_fn=None,
+        pipelining_fn=None,
+    )
+)
+
+__all__ = ["joint_octree_configs", "dual_branch_configs"]
