@@ -10,6 +10,8 @@ from torchtitan.experiments.humanoid.models import (
     DualBranchOctreeDiffusionWrapper,
     JointOctreeDiffusionArgs,
     JointOctreeDiffusionWrapper,
+    SingleStreamJointOctreeDiffusionArgs,
+    SingleStreamJointOctreeDiffusionWrapper,
 )
 from torchtitan.experiments.vem.parallelize import parallelize
 from torchtitan.protocols.train_spec import TrainSpec, register_train_spec
@@ -79,4 +81,29 @@ register_train_spec(
     )
 )
 
-__all__ = ["joint_octree_configs", "dual_branch_configs"]
+
+single_stream_configs = {
+    flavor: SingleStreamJointOctreeDiffusionArgs(**asdict(config))
+    for flavor, config in joint_octree_configs.items()
+}
+
+register_train_spec(
+    TrainSpec(
+        name="humanoid-single-stream-joint-octree",
+        cls=SingleStreamJointOctreeDiffusionWrapper,
+        config=single_stream_configs,
+        parallelize_fn=parallelize,
+        build_optimizers_fn=build_optimizers,
+        build_lr_schedulers_fn=build_lr_schedulers,
+        build_dataloader_fn=build_humanoid_dataloader,
+        build_tokenizer_fn=None,
+        build_loss_fn=None,
+        pipelining_fn=None,
+    )
+)
+
+__all__ = [
+    "joint_octree_configs",
+    "dual_branch_configs",
+    "single_stream_configs",
+]
