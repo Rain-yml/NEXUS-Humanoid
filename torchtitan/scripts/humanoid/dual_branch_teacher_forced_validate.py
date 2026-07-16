@@ -78,7 +78,6 @@ def build_dataset_reader(
     kwargs = dict(config["training"]["dataset_kwargs"])
     return RiggedHumanoidJointOctreeDataset(
         manifest_path=str(manifest),
-        batches_packed=kwargs["batches_packed"],
         joint_schema_path=kwargs["joint_schema_path"],
         split="train",
         repeats=1,
@@ -89,6 +88,7 @@ def build_dataset_reader(
         view_indices=list(kwargs.get("view_indices", [0])),
         drop_image_rate=0.0,
         infinite=False,
+        max_merged_vertices=int(kwargs.get("max_merged_vertices", 11_000)),
     )
 
 
@@ -175,7 +175,7 @@ def main() -> int:
         num_inference_steps=args.steps,
         guidance_scale=args.cfg,
         generator=generator,
-        num_vertices=int(row["num_vertices"]),
+        num_vertices=int(rig.mesh_points.shape[0]),
         enable_progress=True,
         grid_size=grid_size,
         dtype=dtype,
