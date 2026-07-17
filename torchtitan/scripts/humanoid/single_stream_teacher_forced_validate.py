@@ -32,6 +32,11 @@ from torchtitan.experiments.humanoid.pipelines.image_mesh_to_single_stream_joint
     SingleStreamTeacherForcedMeshLayer,
 )
 from torchtitan.experiments.vem.datasets.octree_utils import undiscretize
+from skeleton_visualization import (
+    export_mesh_skeleton_glb,
+    mesh_space_from_nexus,
+    render_prediction_multiview,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -69,6 +74,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cfg", type=float, default=1.0)
     parser.add_argument("--scheduler", choices=["euler", "heun", "dpm"], default="euler")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--prediction-only-multiview",
+        action="store_true",
+        help="Save native-space predictions and four-view renders without GT panels.",
+    )
     return parser.parse_args()
 
 
@@ -187,6 +197,66 @@ def main() -> int:
     predicted_joints = undiscretize(result.joints.cpu().numpy(), grid_size)
     gt_joints = rig.joints
     joint_errors = np.linalg.norm(predicted_joints - gt_joints, axis=1)
+    np.save(out_dir / "predicted_joints_nexus_normalized.npy", predicted_joints)
+
+    with np.load(
+        dataset_reader._read_uri(str(row["rig_npz_uri"])), allow_pickle=True
+    ) as raw_rig:
+        mesh_vertices = np.asarray(raw_rig["vertices"], dtype=np.float32)
+        mesh_faces = np.asarray(raw_rig["faces"], dtype=np.int64)
+    mesh_space_joints = mesh_space_from_nexus(predicted_joints, mesh_vertices)
+    skeleton_path = out_dir / "predicted_skeleton_mesh_space.npz"
+    np.savez_compressed(
+        skeleton_path,
+        positions=mesh_space_joints,
+        joint_names=np.asarray(schema["joints"]),
+        parents=np.asarray(schema["parents"], dtype=np.int64),
+        uuid=np.asarray(sample_uuid),
+        coordinate_space=np.asarray("rig_npz_and_mesh_glb"),
+        rig_npz_uri=np.asarray(str(row["rig_npz_uri"])),
+        mesh_glb_uri=np.asarray(str(row["mesh_glb_uri"])),
+    )
+
+    if args.prediction_only_multiview:
+        multiview_path, view_paths = render_prediction_multiview(
+            mesh_vertices,
+            mesh_faces,
+            mesh_space_joints,
+            schema["parents"],
+            out_dir,
+        )
+        glb_path = out_dir / "mesh_with_predicted_skeleton.glb"
+        export_mesh_skeleton_glb(
+            mesh_vertices,
+            mesh_faces,
+            mesh_space_joints,
+            schema["parents"],
+            glb_path,
+        )
+        summary = {
+            "sample_uuid": sample_uuid,
+            "split": args.split,
+            "stage1_ckpt": str(stage1_ckpt),
+            "stage1_config": str(stage1_config),
+            "teacher_forced_mesh": True,
+            "mesh_prediction_used": False,
+            "joint_count": int(predicted_joints.shape[0]),
+            "mean_joint_error": float(joint_errors.mean()),
+            "max_joint_error": float(joint_errors.max()),
+            "prediction_coordinate_space": "rig_npz_and_mesh_glb",
+            "predicted_skeleton": str(skeleton_path),
+            "mesh_with_predicted_skeleton": str(glb_path),
+            "multiview": str(multiview_path),
+            "views": {name: str(path) for name, path in view_paths.items()},
+            "source": str(row.get("source", "")),
+            "skeleton_convention": str(row.get("skeleton_convention", "")),
+        }
+        (out_dir / "summary.json").write_text(
+            json.dumps(summary, indent=2) + "\n", encoding="utf-8"
+        )
+        print(json.dumps(summary, indent=2))
+        return 0
+
     np.save(out_dir / "predicted_joints.npy", predicted_joints)
     np.save(out_dir / "gt_joints.npy", gt_joints)
 
