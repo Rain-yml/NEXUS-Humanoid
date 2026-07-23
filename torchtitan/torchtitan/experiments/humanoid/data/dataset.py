@@ -51,6 +51,7 @@ class JointOctreeBatch(OctreeBatch):
 class NormalizedHumanoidRig:
     vertices: np.ndarray
     joints: np.ndarray
+    joint_ids: torch.Tensor
     mesh_points: torch.Tensor
     joint_points: torch.Tensor
 
@@ -183,6 +184,7 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
         drop_image_rate: float = 0.1,
         infinite: bool = True,
         max_merged_vertices: int = 11_000,
+        joint_selection: str = "strict",
         dp_rank: int = 0,
         dp_world_size: int = 1,
     ) -> None:
@@ -200,6 +202,11 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
             raise ValueError(f"view_indices must not contain duplicates: {view_indices}")
         self.drop_image_rate = drop_image_rate
         self.infinite = infinite
+        if joint_selection not in {"strict", "available"}:
+            raise ValueError(
+                f"joint_selection must be 'strict' or 'available', got {joint_selection!r}"
+            )
+        self.joint_selection = joint_selection
         if max_merged_vertices < 1:
             raise ValueError("max_merged_vertices must be positive")
         self.max_merged_vertices = max_merged_vertices
@@ -228,6 +235,7 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
             f"RiggedHumanoidJointOctreeDataset: manifest={manifest_path}, split={split}, "
             f"rank_items={len(self.items)}, views={self.view_indices}, "
             f"joints={len(self.schema.joints)}, "
+            f"joint_selection={self.joint_selection}, "
             f"max_merged_vertices={self.max_merged_vertices}"
         )
 
@@ -250,11 +258,16 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
     def _load_normalized_rig(self, row: dict[str, Any]) -> NormalizedHumanoidRig:
         with np.load(self._read_uri(row["rig_npz_uri"]), allow_pickle=True) as rig:
             vertices = np.asarray(rig["vertices"], dtype=np.float32)
-            joints = self.schema.select(
-                rig["joint_semantics"].tolist(),
-                np.asarray(rig["joint_positions"], dtype=np.float32),
-                np.asarray(rig["parents"], dtype=np.int64),
-            )
+            semantics = rig["joint_semantics"].tolist()
+            joint_positions = np.asarray(rig["joint_positions"], dtype=np.float32)
+            source_parents = np.asarray(rig["parents"], dtype=np.int64)
+            if self.joint_selection == "available":
+                joints, joint_ids = self.schema.select_available(
+                    semantics, joint_positions, source_parents
+                )
+            else:
+                joints = self.schema.select(semantics, joint_positions, source_parents)
+                joint_ids = np.arange(len(self.schema.joints), dtype=np.int64)
         vertices, joints = _normalize_like_nexus(vertices, joints)
         mesh_points = np.unique(discretize(vertices, self.grid_size), axis=0)
         if len(mesh_points) > self.max_merged_vertices:
@@ -266,6 +279,7 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
         return NormalizedHumanoidRig(
             vertices=vertices,
             joints=joints,
+            joint_ids=torch.from_numpy(joint_ids).long(),
             mesh_points=torch.from_numpy(mesh_points).long(),
             joint_points=torch.from_numpy(joint_points).long(),
         )
@@ -283,8 +297,10 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
 
     def _load_rig(
         self, row: dict[str, Any], layer_id: int
-    ) -> tuple[OctreeData, JointOctreeData]:
-        return self._build_rig_layer(self._load_normalized_rig(row), layer_id)
+    ) -> tuple[OctreeData, JointOctreeData, torch.Tensor]:
+        rig = self._load_normalized_rig(row)
+        mesh_octree, joint_octree = self._build_rig_layer(rig, layer_id)
+        return mesh_octree, joint_octree, rig.joint_ids
 
     def load_rig_layers_from_row(
         self, row: dict[str, Any]
@@ -306,7 +322,7 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
 
     def get_data(self, instance_id: str, layer_id: int) -> dict[str, Any]:
         row = self.records[instance_id]
-        mesh_octree, joint_octree = self._load_rig(row, layer_id)
+        mesh_octree, joint_octree, joint_ids = self._load_rig(row, layer_id)
         images, masks = zip(
             *(self._load_image(row[f"color_view_{index}_uri"]) for index in self.view_indices)
         )
@@ -317,6 +333,7 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
             "instance_id": instance_id,
             "mesh_octree": mesh_octree,
             "joint_octree": joint_octree,
+            "joint_ids": joint_ids,
             "images": image_tensor,
             "image_masks": torch.stack(masks),
             "view_indices": torch.tensor(self.view_indices, dtype=torch.long),
@@ -374,11 +391,17 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
                 )
                 count_mesh = mesh_occupancy.shape[0]
                 count_joints = joint_occupancy.shape[0]
+                sample_joint_ids = sample["joint_ids"]
+                if sample_joint_ids.shape != (count_joints,):
+                    raise ValueError(
+                        f"Joint ID count {sample_joint_ids.shape} does not match "
+                        f"joint token count {count_joints}"
+                    )
                 depth = mesh.layer_depths[layer_index]
                 depths.append(torch.full((count_mesh + count_joints,), depth, dtype=torch.long))
                 joint_ids.append(
                     torch.cat(
-                        [torch.full((count_mesh,), -1), torch.arange(count_joints, dtype=torch.long)]
+                        [torch.full((count_mesh,), -1), sample_joint_ids]
                     )
                 )
                 joint_masks.append(

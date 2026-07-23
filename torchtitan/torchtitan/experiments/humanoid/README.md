@@ -61,6 +61,12 @@ torchrun --nproc-per-node=8 \
 layerwise rollout: GT mesh tokens remain fixed while the scheduler updates only
 the 28 semantic-joint tokens.
 
+Dataset configs may set `joint_selection = "available"` for mixed skeleton
+conventions. The schema remains one fixed semantic embedding vocabulary, but
+each sample contributes only the unambiguous canonical joints in its NPZ.
+Global schema IDs travel with those tokens through collation, so missing eyes or
+finger bases do not renumber any other joint.
+
 New architectural experiments should normally be sibling model or pipeline
 files with their own model flavor and TOML. Shared behavior should only be
 factored out after two real variants need it.

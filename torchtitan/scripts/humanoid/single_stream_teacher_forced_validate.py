@@ -99,6 +99,7 @@ def build_dataset_reader(
         drop_image_rate=0.0,
         infinite=False,
         max_merged_vertices=int(kwargs.get("max_merged_vertices", 11_000)),
+        joint_selection=str(kwargs.get("joint_selection", "strict")),
     )
 
 
@@ -196,7 +197,9 @@ def main() -> int:
 
     predicted_joints = undiscretize(result.joints.cpu().numpy(), grid_size)
     gt_joints = rig.joints
-    joint_errors = np.linalg.norm(predicted_joints - gt_joints, axis=1)
+    gt_joint_ids = rig.joint_ids.cpu().numpy()
+    gt_parents = dataset_reader.schema.parents_for_ids(gt_joint_ids)
+    joint_errors = np.linalg.norm(predicted_joints[gt_joint_ids] - gt_joints, axis=1)
     np.save(out_dir / "predicted_joints_nexus_normalized.npy", predicted_joints)
 
     with np.load(
@@ -268,7 +271,7 @@ def main() -> int:
         empty_faces,
         gt_preview,
         joints=gt_joints,
-        joint_parents=schema["parents"],
+        joint_parents=gt_parents,
     )
     render_mesh_preview(
         rig.vertices,
@@ -296,6 +299,7 @@ def main() -> int:
         "mesh_layers": len(mesh_layers),
         "mesh_prediction_used": False,
         "joint_count": int(predicted_joints.shape[0]),
+        "evaluated_joint_ids": gt_joint_ids.tolist(),
         "mean_joint_error": float(joint_errors.mean()),
         "max_joint_error": float(joint_errors.max()),
         "per_joint_error": joint_errors.tolist(),

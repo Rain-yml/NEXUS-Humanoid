@@ -58,6 +58,54 @@ class JointSchema:
         by_name["spine_1"] = positions[spine_indices[1]]
         return np.stack([by_name[name] for name in self.joints]).astype(np.float32)
 
+    def select_available(
+        self,
+        semantics: Sequence[str],
+        positions: np.ndarray,
+        source_parents: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Select unambiguous joints and return positions with stable schema IDs."""
+        semantics = [str(value) for value in semantics]
+        selected: dict[int, np.ndarray] = {}
+        for joint_id, semantic in enumerate(self.joints):
+            if semantic in {"spine_0", "spine_1"}:
+                continue
+            matches = [index for index, value in enumerate(semantics) if value == semantic]
+            if len(matches) == 1:
+                selected[joint_id] = positions[matches[0]]
+
+        spine_indices = [index for index, value in enumerate(semantics) if value == "spine"]
+        if len(spine_indices) == 2:
+            spine_set = set(spine_indices)
+            spine_indices.sort(
+                key=lambda index: self._ancestor_depth(index, source_parents, spine_set)
+            )
+            for semantic, source_index in zip(
+                ("spine_0", "spine_1"), spine_indices, strict=True
+            ):
+                if semantic in self.joints:
+                    selected[self.joints.index(semantic)] = positions[source_index]
+
+        if not selected:
+            raise ValueError("No unambiguous joints match the canonical schema")
+        joint_ids = np.asarray(sorted(selected), dtype=np.int64)
+        joint_positions = np.stack([selected[int(joint_id)] for joint_id in joint_ids])
+        return joint_positions.astype(np.float32), joint_ids
+
+    def parents_for_ids(self, joint_ids: Sequence[int]) -> np.ndarray:
+        """Map schema parents into a subset, skipping absent ancestors."""
+        joint_ids = [int(joint_id) for joint_id in joint_ids]
+        local_by_global = {
+            global_id: local_id for local_id, global_id in enumerate(joint_ids)
+        }
+        local_parents = []
+        for global_id in joint_ids:
+            parent = self.parents[global_id]
+            while parent >= 0 and parent not in local_by_global:
+                parent = self.parents[parent]
+            local_parents.append(local_by_global.get(parent, -1))
+        return np.asarray(local_parents, dtype=np.int64)
+
     @staticmethod
     def _ancestor_depth(index: int, parents: np.ndarray, spine_set: set[int]) -> int:
         depth = 0

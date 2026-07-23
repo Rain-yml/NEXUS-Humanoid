@@ -17,6 +17,11 @@ def main() -> None:
         type=Path,
         default=Path("torchtitan/experiments/humanoid/data/humanoid_28_v1.json"),
     )
+    parser.add_argument(
+        "--joint-selection",
+        choices=("strict", "available"),
+        default="strict",
+    )
     args = parser.parse_args()
     dataset = RiggedHumanoidJointOctreeDataset(
         manifest_path=str(args.manifest),
@@ -24,11 +29,13 @@ def main() -> None:
         split=args.split,
         infinite=False,
         drop_image_rate=0.0,
+        joint_selection=args.joint_selection,
     )
-    sample = next(iter(dataset))
+    sample = next(iter(dataset))[0]
     print(f"uuid={sample['instance_id']}")
     print(f"mesh_nodes={[x.shape[0] for x in sample['mesh_octree'].layer_occupancy]}")
     print(f"joint_nodes={[x.shape[0] for x in sample['joint_octree'].layer_occupancy]}")
+    print(f"joint_ids={sample['joint_ids'].tolist()}")
     print(f"images={tuple(sample['images'].shape)}")
 
 
