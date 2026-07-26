@@ -23,6 +23,14 @@ from torchtitan.experiments.humanoid.data.joint_octree import (
     build_joint_specific_layer,
 )
 from torchtitan.experiments.humanoid.data.manifest import parse_bos_uri, read_manifest
+from torchtitan.experiments.humanoid.data.rig_records import (
+    HUMANOID_RESAVE_FORMAT,
+    load_rig_record,
+)
+from torchtitan.experiments.humanoid.data.skeleton_augmentation import (
+    augment_reference_skeleton,
+    skeleton_edges,
+)
 from torchtitan.experiments.vem.datasets.mesh_utils import rand_with_pt
 from torchtitan.experiments.vem.datasets.octree_utils import (
     OctreeBatch,
@@ -37,12 +45,40 @@ from torchtitan.tools.logging import logger
 class JointOctreeBatch(OctreeBatch):
     joint_ids_flat: torch.Tensor | None = None
     joint_mask_flat: torch.Tensor | None = None
+    reference_joint_positions_flat: torch.Tensor | None = None
+    reference_joint_rope_positions_flat: torch.Tensor | None = None
+    reference_edge_index_flat: torch.Tensor | None = None
+    reference_cu_seqlens: torch.Tensor | None = None
 
     def to(self, device: torch.device) -> "JointOctreeBatch":
         values = vars(super().to(device))
         values.update(
-            joint_ids_flat=self.joint_ids_flat.to(device),
-            joint_mask_flat=self.joint_mask_flat.to(device),
+            joint_ids_flat=(
+                self.joint_ids_flat.to(device) if self.joint_ids_flat is not None else None
+            ),
+            joint_mask_flat=(
+                self.joint_mask_flat.to(device) if self.joint_mask_flat is not None else None
+            ),
+            reference_joint_positions_flat=(
+                self.reference_joint_positions_flat.to(device)
+                if self.reference_joint_positions_flat is not None
+                else None
+            ),
+            reference_joint_rope_positions_flat=(
+                self.reference_joint_rope_positions_flat.to(device)
+                if self.reference_joint_rope_positions_flat is not None
+                else None
+            ),
+            reference_edge_index_flat=(
+                self.reference_edge_index_flat.to(device)
+                if self.reference_edge_index_flat is not None
+                else None
+            ),
+            reference_cu_seqlens=(
+                self.reference_cu_seqlens.to(device)
+                if self.reference_cu_seqlens is not None
+                else None
+            ),
         )
         return JointOctreeBatch(**values)
 
@@ -51,6 +87,7 @@ class JointOctreeBatch(OctreeBatch):
 class NormalizedHumanoidRig:
     vertices: np.ndarray
     joints: np.ndarray
+    parents: torch.Tensor
     joint_ids: torch.Tensor
     mesh_points: torch.Tensor
     joint_points: torch.Tensor
@@ -173,7 +210,7 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
     def __init__(
         self,
         manifest_path: str,
-        joint_schema_path: str,
+        joint_schema_path: str | None = None,
         split: str = "train",
         repeats: int = 1,
         shuffle_seed: int = 42,
@@ -185,13 +222,17 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
         infinite: bool = True,
         max_merged_vertices: int = 11_000,
         joint_selection: str = "strict",
+        reference_skeleton_augmentation: bool = False,
+        reference_max_local_rotation_degrees: float = 20.0,
+        reference_bone_length_log_std: float = 0.08,
+        reference_root_translation_std: float = 0.03,
         dp_rank: int = 0,
         dp_world_size: int = 1,
     ) -> None:
         if grid_size != 2**max_depth:
             raise ValueError(f"grid_size={grid_size} must equal 2 ** max_depth={max_depth}")
         self.manifest_path = str(manifest_path)
-        self.schema = JointSchema.load(joint_schema_path)
+        self.schema = JointSchema.load(joint_schema_path) if joint_schema_path else None
         self.grid_size = grid_size
         self.max_depth = max_depth
         self.image_resolution = image_resolution
@@ -207,6 +248,10 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
                 f"joint_selection must be 'strict' or 'available', got {joint_selection!r}"
             )
         self.joint_selection = joint_selection
+        self.reference_skeleton_augmentation = reference_skeleton_augmentation
+        self.reference_max_local_rotation_degrees = reference_max_local_rotation_degrees
+        self.reference_bone_length_log_std = reference_bone_length_log_std
+        self.reference_root_translation_std = reference_root_translation_std
         if max_merged_vertices < 1:
             raise ValueError("max_merged_vertices must be positive")
         self.max_merged_vertices = max_merged_vertices
@@ -215,12 +260,17 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
 
         self.transform = build_humanoid_image_transform()
 
-        frame = read_manifest(manifest_path, split=split)
-        schema_names = set(frame["joint_schema"].dropna().astype(str))
-        if schema_names != {self.schema.name}:
-            raise ValueError(
-                f"Manifest joint_schema values {sorted(schema_names)} do not match {self.schema.name!r}"
-            )
+        frame = read_manifest(
+            manifest_path, split=split, view_indices=self.view_indices
+        )
+        if self.schema is not None:
+            if "joint_schema" not in frame:
+                raise ValueError("A canonical joint schema requires a joint_schema column")
+            schema_names = set(frame["joint_schema"].dropna().astype(str))
+            if schema_names != {self.schema.name}:
+                raise ValueError(
+                    f"Manifest joint_schema values {sorted(schema_names)} do not match {self.schema.name!r}"
+                )
         self.records = frame.set_index("uuid").to_dict("index")
         items = [
             (uuid, layer_id)
@@ -234,8 +284,9 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
         logger.info(
             f"RiggedHumanoidJointOctreeDataset: manifest={manifest_path}, split={split}, "
             f"rank_items={len(self.items)}, views={self.view_indices}, "
-            f"joints={len(self.schema.joints)}, "
+            f"joint_schema={self.schema.name if self.schema is not None else 'per-asset'}, "
             f"joint_selection={self.joint_selection}, "
+            f"reference_skeleton_augmentation={self.reference_skeleton_augmentation}, "
             f"max_merged_vertices={self.max_merged_vertices}"
         )
 
@@ -257,18 +308,16 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
 
     def _load_normalized_rig(self, row: dict[str, Any]) -> NormalizedHumanoidRig:
         with np.load(self._read_uri(row["rig_npz_uri"]), allow_pickle=True) as rig:
-            vertices = np.asarray(rig["vertices"], dtype=np.float32)
-            semantics = rig["joint_semantics"].tolist()
-            joint_positions = np.asarray(rig["joint_positions"], dtype=np.float32)
-            source_parents = np.asarray(rig["parents"], dtype=np.int64)
-            if self.joint_selection == "available":
-                joints, joint_ids = self.schema.select_available(
-                    semantics, joint_positions, source_parents
-                )
-            else:
-                joints = self.schema.select(semantics, joint_positions, source_parents)
-                joint_ids = np.arange(len(self.schema.joints), dtype=np.int64)
-        vertices, joints = _normalize_like_nexus(vertices, joints)
+            rig_format = row.get("rig_format", HUMANOID_RESAVE_FORMAT)
+            if not isinstance(rig_format, str) or not rig_format:
+                rig_format = HUMANOID_RESAVE_FORMAT
+            record = load_rig_record(
+                rig,
+                rig_format=rig_format,
+                schema=self.schema,
+                joint_selection=self.joint_selection,
+            )
+        vertices, joints = _normalize_like_nexus(record.vertices, record.joints)
         mesh_points = np.unique(discretize(vertices, self.grid_size), axis=0)
         if len(mesh_points) > self.max_merged_vertices:
             raise OversizedHumanoidRigError(
@@ -279,7 +328,8 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
         return NormalizedHumanoidRig(
             vertices=vertices,
             joints=joints,
-            joint_ids=torch.from_numpy(joint_ids).long(),
+            parents=torch.from_numpy(record.parents).long(),
+            joint_ids=torch.from_numpy(record.joint_ids).long(),
             mesh_points=torch.from_numpy(mesh_points).long(),
             joint_points=torch.from_numpy(joint_points).long(),
         )
@@ -322,23 +372,40 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
 
     def get_data(self, instance_id: str, layer_id: int) -> dict[str, Any]:
         row = self.records[instance_id]
-        mesh_octree, joint_octree, joint_ids = self._load_rig(row, layer_id)
+        rig = self._load_normalized_rig(row)
+        mesh_octree, joint_octree = self._build_rig_layer(rig, layer_id)
         images, masks = zip(
             *(self._load_image(row[f"color_view_{index}_uri"]) for index in self.view_indices)
         )
         image_tensor = torch.stack(images)
         if self.drop_image_rate > 0 and rand_with_pt([0, 1]) < self.drop_image_rate:
             image_tensor = torch.full_like(image_tensor, 0.5)
-        return {
+        result = {
             "instance_id": instance_id,
             "mesh_octree": mesh_octree,
             "joint_octree": joint_octree,
-            "joint_ids": joint_ids,
+            "joint_ids": rig.joint_ids,
             "images": image_tensor,
             "image_masks": torch.stack(masks),
             "view_indices": torch.tensor(self.view_indices, dtype=torch.long),
             "num_vertices": int(mesh_octree.num_vertices),
         }
+        if self.reference_skeleton_augmentation:
+            reference_joints = augment_reference_skeleton(
+                torch.from_numpy(rig.joints),
+                rig.parents,
+                max_local_rotation_degrees=self.reference_max_local_rotation_degrees,
+                bone_length_log_std=self.reference_bone_length_log_std,
+                root_translation_std=self.reference_root_translation_std,
+            ).clamp(-1.0, 1.0)
+            result.update(
+                reference_joint_positions=reference_joints,
+                reference_joint_rope_positions=torch.from_numpy(
+                    discretize(reference_joints.numpy(), self.grid_size)
+                ).long(),
+                joint_parents=rig.parents,
+            )
+        return result
 
     def __iter__(self):
         while True:
@@ -375,6 +442,9 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
         batch = [item for packed_batch in batch for item in packed_batch]
         occupancies, centers, depths = [], [], []
         joint_ids, joint_masks, sequence_lengths, instance_ids = [], [], [], []
+        reference_positions, reference_rope_positions = [], []
+        reference_edges, reference_sequence_lengths = [], []
+        reference_offset = 0
         layers_per_mesh = []
         for sample in batch:
             mesh = sample["mesh_octree"]
@@ -411,6 +481,30 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
                 )
                 sequence_lengths.append(count_mesh + count_joints)
                 instance_ids.append(sample["instance_id"])
+                if "reference_joint_positions" in sample:
+                    if sample["reference_joint_positions"].shape != (count_joints, 3):
+                        raise ValueError("Reference joint count does not match target joints")
+                    reference_positions.append(sample["reference_joint_positions"])
+                    reference_rope_positions.append(
+                        sample["reference_joint_rope_positions"]
+                    )
+                    reference_edges.append(
+                        skeleton_edges(sample["joint_parents"]) + reference_offset
+                    )
+                    reference_sequence_lengths.append(count_joints)
+                    reference_offset += count_joints
+
+        has_references = bool(reference_positions)
+        if has_references and len(reference_sequence_lengths) != len(sequence_lengths):
+            raise ValueError("Reference skeletons must be present for every packed sequence")
+        reference_cu_seqlens = None
+        if has_references:
+            reference_cu_seqlens = torch.zeros(
+                len(reference_sequence_lengths) + 1, dtype=torch.int32
+            )
+            reference_cu_seqlens[1:] = torch.cumsum(
+                torch.tensor(reference_sequence_lengths, dtype=torch.int32), dim=0
+            )
 
         cu_seqlens = torch.zeros(len(sequence_lengths) + 1, dtype=torch.int32)
         cu_seqlens[1:] = torch.cumsum(torch.tensor(sequence_lengths, dtype=torch.int32), dim=0)
@@ -438,6 +532,16 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
             mv_cu_seqlens=mv_cu_seqlens,
             joint_ids_flat=torch.cat(joint_ids),
             joint_mask_flat=torch.cat(joint_masks),
+            reference_joint_positions_flat=(
+                torch.cat(reference_positions) if has_references else None
+            ),
+            reference_joint_rope_positions_flat=(
+                torch.cat(reference_rope_positions) if has_references else None
+            ),
+            reference_edge_index_flat=(
+                torch.cat(reference_edges, dim=1) if has_references else None
+            ),
+            reference_cu_seqlens=reference_cu_seqlens,
         )
         del batch
         gc.collect()

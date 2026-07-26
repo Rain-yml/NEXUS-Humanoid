@@ -10,6 +10,10 @@ from torchtitan.experiments.humanoid.models.single_stream_joint_octree_wrapper i
     SingleStreamJointOctreeDiffusionArgs,
     SingleStreamJointOctreeDiffusionWrapper,
 )
+from torchtitan.experiments.humanoid.models.reference_skeleton_single_stream_wrapper import (
+    ReferenceSkeletonSingleStreamDiffusionArgs,
+    ReferenceSkeletonSingleStreamDiffusionWrapper,
+)
 
 __all__ = [
     "JointOctreeDiffusionArgs",
@@ -18,4 +22,6 @@ __all__ = [
     "DualBranchOctreeDiffusionWrapper",
     "SingleStreamJointOctreeDiffusionArgs",
     "SingleStreamJointOctreeDiffusionWrapper",
+    "ReferenceSkeletonSingleStreamDiffusionArgs",
+    "ReferenceSkeletonSingleStreamDiffusionWrapper",
 ]

@@ -8,23 +8,22 @@ from urllib.parse import urlparse
 import pandas as pd
 
 
-REQUIRED_COLUMNS = (
+CORE_REQUIRED_COLUMNS = (
     "uuid",
     "split",
-    "joint_schema",
     "rig_npz_uri",
-    "mesh_glb_uri",
-    "render_meta_uri",
-    "color_view_0_uri",
-    "color_view_1_uri",
-    "color_view_2_uri",
-    "color_view_3_uri",
 )
 
 
-def read_manifest(path: str | Path, split: str | None = None) -> pd.DataFrame:
+def read_manifest(
+    path: str | Path,
+    split: str | None = None,
+    view_indices: tuple[int, ...] | list[int] = (0,),
+) -> pd.DataFrame:
     frame = pd.read_parquet(path)
-    missing = sorted(set(REQUIRED_COLUMNS) - set(frame.columns))
+    required = set(CORE_REQUIRED_COLUMNS)
+    required.update(f"color_view_{index}_uri" for index in view_indices)
+    missing = sorted(required - set(frame.columns))
     if missing:
         raise ValueError(f"Manifest {path} is missing columns: {missing}")
     if frame["uuid"].duplicated().any():

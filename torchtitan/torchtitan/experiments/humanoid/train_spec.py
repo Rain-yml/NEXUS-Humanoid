@@ -10,6 +10,8 @@ from torchtitan.experiments.humanoid.models import (
     DualBranchOctreeDiffusionWrapper,
     JointOctreeDiffusionArgs,
     JointOctreeDiffusionWrapper,
+    ReferenceSkeletonSingleStreamDiffusionArgs,
+    ReferenceSkeletonSingleStreamDiffusionWrapper,
     SingleStreamJointOctreeDiffusionArgs,
     SingleStreamJointOctreeDiffusionWrapper,
 )
@@ -51,6 +53,32 @@ register_train_spec(
         name="humanoid-joint-octree",
         cls=JointOctreeDiffusionWrapper,
         config=joint_octree_configs,
+        parallelize_fn=parallelize,
+        build_optimizers_fn=build_optimizers,
+        build_lr_schedulers_fn=build_lr_schedulers,
+        build_dataloader_fn=build_humanoid_dataloader,
+        build_tokenizer_fn=None,
+        build_loss_fn=None,
+        pipelining_fn=None,
+    )
+)
+
+reference_skeleton_configs = {
+    flavor: ReferenceSkeletonSingleStreamDiffusionArgs(
+        **{
+            key: value
+            for key, value in asdict(config).items()
+            if key != "num_joint_tokens"
+        }
+    )
+    for flavor, config in joint_octree_configs.items()
+}
+
+register_train_spec(
+    TrainSpec(
+        name="humanoid-reference-skeleton-single-stream",
+        cls=ReferenceSkeletonSingleStreamDiffusionWrapper,
+        config=reference_skeleton_configs,
         parallelize_fn=parallelize,
         build_optimizers_fn=build_optimizers,
         build_lr_schedulers_fn=build_lr_schedulers,
@@ -106,4 +134,5 @@ __all__ = [
     "joint_octree_configs",
     "dual_branch_configs",
     "single_stream_configs",
+    "reference_skeleton_configs",
 ]

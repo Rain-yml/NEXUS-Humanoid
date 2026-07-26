@@ -71,6 +71,32 @@ each sample contributes only the unambiguous canonical joints in its NPZ.
 Global schema IDs travel with those tokens through collation, so missing eyes or
 finger bases do not renumber any other joint.
 
+The reference-skeleton variant removes that fixed semantic vocabulary. Source
+adapters in `data/rig_records.py` convert canonical resaves and AniGenP
+voxelized NPZs into the same `vertices, joints, parents` contract. The dataset
+then creates a reference skeleton through hierarchical forward-kinematics
+augmentation: topology is fixed, while bounded local rotations and bone-length
+scales accumulate through each tree. It does not add independent joint noise.
+
+Each reference encoder block applies the reused stage-2 graph message-passing
+layer over parent-child edges, followed by packed global self-attention with
+3D RoPE. Three blocks operate directly in the 3072-dimensional NEXUS token
+space. Their per-joint outputs replace semantic joint embeddings in the copied
+single-stream model; clean mesh tokens, joint noising, NEXUS backbone weights,
+output head, and joint-only flow loss are unchanged.
+
+```bash
+python scripts/humanoid/build_anigenp_manifest.py \
+  --input /path/to/AniGenP/data/anigen/manifest_all.json \
+  --full-output /path/to/anigenp_arbitrary_skeleton_full_v1.parquet \
+  --train-output /path/to/anigenp_arbitrary_skeleton_train100k_v1.parquet
+
+torchrun --nproc-per-node=8 \
+  -m torchtitan.experiments.humanoid.single_stream_trainer \
+  --job.config_file \
+  torchtitan/experiments/humanoid/configs/single_stream/front_anigen100k_reference_skeleton.toml
+```
+
 New architectural experiments should normally be sibling model or pipeline
 files with their own model flavor and TOML. Shared behavior should only be
 factored out after two real variants need it.

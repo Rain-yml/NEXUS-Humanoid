@@ -5,7 +5,10 @@ from torchtitan.experiments.vem.dataloader import ParallelAwareDataloader
 
 
 def build_humanoid_dataloader(dp_world_size, dp_rank, job_config, **kwargs):
-    if job_config.training.dataset != "rigged-humanoid-joint-octree":
+    if job_config.training.dataset not in {
+        "rigged-humanoid-joint-octree",
+        "rigged-skeleton-reference-octree",
+    }:
         raise ValueError(f"Unsupported humanoid dataset: {job_config.training.dataset}")
     dataset = RiggedHumanoidJointOctreeDataset(
         **job_config.training.dataset_kwargs,
