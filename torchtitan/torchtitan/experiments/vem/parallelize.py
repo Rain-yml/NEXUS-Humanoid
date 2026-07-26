@@ -51,6 +51,14 @@ def parallelize(
     parallel_dims: ParallelDims,
     job_config: JobConfig,
 ):
+    # Muon's Triton Newton-Schulz kernel is compiled separately from the model
+    # and specializes once per parameter shape.
+    if (
+        job_config.optimizer.name.lower() == "muon"
+        and job_config.optimizer.use_triton
+    ):
+        torch._dynamo.config.cache_size_limit = 100
+
     if parallel_dims.tp_enabled:
         if (
             job_config.parallelism.enable_async_tensor_parallel
