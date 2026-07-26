@@ -12,9 +12,13 @@ from torchtitan.experiments.humanoid.pipelines.image_mesh_to_single_stream_joint
     ImageMeshToSingleStreamJointOctreePipeline,
     SingleStreamTeacherForcedMeshLayer,
 )
+from torchtitan.experiments.humanoid.pipelines.image_mesh_reference_skeleton_to_single_stream_joint_octree import (
+    ImageMeshReferenceSkeletonToSingleStreamJointOctreePipeline,
+)
 
 __all__ = [
     "ImageMeshToJointOctreePipeline",
+    "ImageMeshReferenceSkeletonToSingleStreamJointOctreePipeline",
     "ImageMeshToSingleStreamJointOctreePipeline",
     "ImageToDualBranchOctreePipeline",
     "ImageToJointOctreePipeline",
