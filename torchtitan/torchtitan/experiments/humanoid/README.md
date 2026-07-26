@@ -88,14 +88,21 @@ output head, and joint-only flow loss are unchanged.
 ```bash
 python scripts/humanoid/build_anigenp_manifest.py \
   --input /path/to/AniGenP/data/anigen/manifest_all.json \
-  --full-output /path/to/anigenp_arbitrary_skeleton_full_v1.parquet \
-  --train-output /path/to/anigenp_arbitrary_skeleton_train100k_v1.parquet
+  --full-output /path/to/anigenp_asset_front_full_v2.parquet \
+  --train-output /path/to/anigenp_asset_front_train100k_v2.parquet
 
 torchrun --nproc-per-node=8 \
   -m torchtitan.experiments.humanoid.single_stream_trainer \
   --job.config_file \
   torchtitan/experiments/humanoid/configs/single_stream/front_anigen100k_reference_skeleton.toml
 ```
+
+AniGenP manifests are asset-centered. Pose rows from the same base asset always
+share one deterministic split, and train subsets include complete asset groups.
+Each pose contributes one condition image: the available rendered camera whose
+direction is closest to the canonical front (`-Y`). Poses without a camera
+inside the configured 20-degree front cone are excluded. The selected frame
+index, azimuth, elevation, and angular error remain in the Parquet for auditing.
 
 New architectural experiments should normally be sibling model or pipeline
 files with their own model flavor and TOML. Shared behavior should only be

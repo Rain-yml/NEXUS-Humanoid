@@ -1,5 +1,5 @@
 [job]
-dump_folder = "./outputs/humanoid_reference_skeleton_front_anigen100k"
+dump_folder = "./outputs/humanoid_reference_skeleton_front_anigen100k_v2"
 description = "Reference-skeleton single-stream joint training on AniGenP 100k"
 print_args = true
 
@@ -79,7 +79,7 @@ pretrained_path = "/mnt/pfs/users/liyumeng/checkpoints/nexus/octdiff_5B_xpred_vl
 loss_type = "xpred-vloss"
 
 [training.dataset_kwargs]
-manifest_path = "/mnt/pfs/users/liyumeng/data/rigged_humanoid/datasets/anigenp_arbitrary_skeleton_train100k_v1.parquet"
+manifest_path = "/mnt/pfs/users/liyumeng/data/rigged_humanoid/datasets/anigenp_asset_front_train100k_v2.parquet"
 split = "train"
 repeats = 1
 shuffle_seed = 42
@@ -132,7 +132,7 @@ custom_args_module = "torchtitan.experiments.humanoid.arguments"
 [checkpoint]
 enable_checkpoint = true
 folder = "ckpts"
-path_override = "./outputs/humanoid_reference_skeleton_front_anigen100k/ckpts"
+path_override = "./outputs/humanoid_reference_skeleton_front_anigen100k_v2/ckpts"
 load_path_override = ""
 load_model_exclude_keys = []
 interval = 1000

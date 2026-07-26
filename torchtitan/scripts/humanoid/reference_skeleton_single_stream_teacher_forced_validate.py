@@ -48,7 +48,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--stage1-output-root",
-        default="./outputs/humanoid_reference_skeleton_front_anigen100k",
+        default="./outputs/humanoid_reference_skeleton_front_anigen100k_v2",
     )
     parser.add_argument("--stage1-ckpt", default="")
     parser.add_argument(
@@ -59,13 +59,19 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--stage1-ema", action="store_true", default=False)
-    parser.add_argument("--manifest", default="")
+    parser.add_argument(
+        "--manifest",
+        default=(
+            "/mnt/pfs/users/liyumeng/data/rigged_humanoid/datasets/"
+            "anigenp_asset_front_full_v2.parquet"
+        ),
+    )
     parser.add_argument("--split", choices=["train", "val", "test"], default="test")
     parser.add_argument("--sample-index", type=int, default=0)
     parser.add_argument(
         "--output-dir",
         default=(
-            "./outputs/humanoid_reference_skeleton_front_anigen100k/"
+            "./outputs/humanoid_reference_skeleton_front_anigen100k_v2/"
             "validation_teacher_forced"
         ),
     )
@@ -110,26 +116,37 @@ def build_dataset_reader(
 def load_training_eligible_sample(
     dataset: RiggedHumanoidJointOctreeDataset, sample_index: int
 ):
-    """Resolve an index after applying training's merged-vertex hard limit."""
+    """Resolve a base-asset index after applying training's vertex limit."""
     if sample_index < 0:
         raise ValueError(f"sample_index must be non-negative, got {sample_index}")
 
-    eligible_index = 0
-    oversized_count = 0
+    asset_rows: dict[str, list[tuple[int, dict]]] = {}
     for manifest_index, (sample_uuid, record) in enumerate(dataset.records.items()):
         row = {"uuid": sample_uuid, **record}
-        try:
-            rig, octree_layers = dataset.load_rig_layers_from_row(row)
-        except OversizedHumanoidRigError:
-            oversized_count += 1
+        asset_id = str(row.get("base_asset_id") or sample_uuid)
+        asset_rows.setdefault(asset_id, []).append((manifest_index, row))
+
+    eligible_index = 0
+    oversized_count = 0
+    for rows in asset_rows.values():
+        eligible_pose = None
+        for manifest_index, row in rows:
+            try:
+                rig, octree_layers = dataset.load_rig_layers_from_row(row)
+            except OversizedHumanoidRigError:
+                oversized_count += 1
+                continue
+            eligible_pose = (row, rig, octree_layers, manifest_index)
+            break
+        if eligible_pose is None:
             continue
         if eligible_index == sample_index:
-            return row, rig, octree_layers, manifest_index, oversized_count
+            return (*eligible_pose, oversized_count)
         eligible_index += 1
 
     raise IndexError(
-        f"Eligible sample index {sample_index} is outside {dataset.manifest_path}; "
-        f"found {eligible_index} samples after skipping {oversized_count} oversized rigs"
+        f"Eligible asset index {sample_index} is outside {dataset.manifest_path}; "
+        f"found {eligible_index} assets after skipping {oversized_count} oversized poses"
     )
 
 
@@ -351,10 +368,11 @@ def main() -> int:
 
     summary = {
         "sample_uuid": sample_uuid,
+        "base_asset_id": str(row.get("base_asset_id") or sample_uuid),
         "split": args.split,
-        "eligible_sample_index": args.sample_index,
+        "eligible_asset_index": args.sample_index,
         "manifest_row_index": manifest_index,
-        "oversized_rows_skipped_before_sample": oversized_before_sample,
+        "oversized_poses_skipped_before_asset": oversized_before_sample,
         "stage1_ckpt": str(stage1_ckpt),
         "stage1_config": str(stage1_config),
         "teacher_forced_mesh": True,
