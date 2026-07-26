@@ -15,7 +15,6 @@ from dual_branch_i2v_v2f_validate import (
     latest_dcp_checkpoint,
     load_condition_image,
     load_model,
-    load_parquet_sample,
     make_contact_sheet,
     make_scheduler,
     read_toml,
@@ -25,6 +24,7 @@ from dual_branch_i2v_v2f_validate import (
 )
 from torchtitan.experiments.humanoid.data.bos import BOSClient
 from torchtitan.experiments.humanoid.data.dataset import (
+    OversizedHumanoidRigError,
     RiggedHumanoidJointOctreeDataset,
 )
 from torchtitan.experiments.humanoid.pipelines.image_mesh_to_single_stream_joint_octree import (
@@ -103,6 +103,32 @@ def build_dataset_reader(
     )
 
 
+def load_training_eligible_sample(
+    dataset: RiggedHumanoidJointOctreeDataset, sample_index: int
+):
+    """Resolve an index after applying training's merged-vertex hard limit."""
+    if sample_index < 0:
+        raise ValueError(f"sample_index must be non-negative, got {sample_index}")
+
+    eligible_index = 0
+    oversized_count = 0
+    for manifest_index, (sample_uuid, record) in enumerate(dataset.records.items()):
+        row = {"uuid": sample_uuid, **record}
+        try:
+            rig, octree_layers = dataset.load_rig_layers_from_row(row)
+        except OversizedHumanoidRigError:
+            oversized_count += 1
+            continue
+        if eligible_index == sample_index:
+            return row, rig, octree_layers, manifest_index, oversized_count
+        eligible_index += 1
+
+    raise IndexError(
+        f"Eligible sample index {sample_index} is outside {dataset.manifest_path}; "
+        f"found {eligible_index} samples after skipping {oversized_count} oversized rigs"
+    )
+
+
 def main() -> int:
     args = parse_args()
     stage1_root = Path(args.stage1_output_root)
@@ -133,7 +159,10 @@ def main() -> int:
     if device.type == "cuda" and device.index is not None:
         torch.cuda.set_device(device.index)
 
-    row = load_parquet_sample(manifest, args.split, args.sample_index)
+    dataset_reader = build_dataset_reader(config_dict, manifest, args.split)
+    row, rig, octree_layers, manifest_index, oversized_before_sample = (
+        load_training_eligible_sample(dataset_reader, args.sample_index)
+    )
     sample_uuid = str(row["uuid"])
     view_index = int(dataset_kwargs.get("view_indices", [0])[0])
     grid_size = int(dataset_kwargs["grid_size"])
@@ -141,8 +170,6 @@ def main() -> int:
     image_size = int(dataset_kwargs["image_resolution"])
     schema = json.loads(joint_schema_path.read_text(encoding="utf-8"))
 
-    dataset_reader = build_dataset_reader(config_dict, manifest, args.split)
-    rig, octree_layers = dataset_reader.load_rig_layers_from_row(row)
     gt_joints = rig.joints
     gt_joint_ids = rig.joint_ids.cpu().numpy()
     gt_parents = dataset_reader.schema.parents_for_ids(gt_joint_ids)
@@ -254,6 +281,9 @@ def main() -> int:
         summary = {
             "sample_uuid": sample_uuid,
             "split": args.split,
+            "eligible_sample_index": args.sample_index,
+            "manifest_row_index": manifest_index,
+            "oversized_rows_skipped_before_sample": oversized_before_sample,
             "stage1_ckpt": str(stage1_ckpt),
             "stage1_config": str(stage1_config),
             "teacher_forced_mesh": True,
@@ -311,6 +341,9 @@ def main() -> int:
     summary = {
         "sample_uuid": sample_uuid,
         "split": args.split,
+        "eligible_sample_index": args.sample_index,
+        "manifest_row_index": manifest_index,
+        "oversized_rows_skipped_before_sample": oversized_before_sample,
         "stage1_ckpt": str(stage1_ckpt),
         "stage1_config": str(stage1_config),
         "teacher_forced_mesh": True,

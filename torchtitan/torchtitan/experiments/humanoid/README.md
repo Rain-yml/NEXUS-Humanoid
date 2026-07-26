@@ -62,6 +62,8 @@ layerwise rollout: GT mesh tokens remain fixed while the scheduler updates only
 the requested semantic-joint tokens. Test-split validation passes each asset's
 available global joint IDs, so missing joints are neither instantiated nor
 renumbered; callers that omit explicit IDs retain the full 28-joint default.
+Its `--sample-index` addresses the split after applying the configured merged-
+vertex limit, matching the samples that are eligible for training.
 
 Dataset configs may set `joint_selection = "available"` for mixed skeleton
 conventions. The schema remains one fixed semantic embedding vocabulary, but
