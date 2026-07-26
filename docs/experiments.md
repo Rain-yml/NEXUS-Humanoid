@@ -30,6 +30,14 @@ front-view experiment. It keeps one global 28-joint embedding vocabulary while
 loading only the canonical joints available in each asset. It runs for 100,000
 steps, saves every 1,000 steps, and retains the latest three checkpoints.
 
+`single_stream/front_vroid10k_no_vroid_textured50k_dynamic_joints.toml` trains
+the same model on the deduplicated union of
+`humanoid28_qem20k_vroid_train10k_v1.parquet` and
+`humanoid-hands-toe-bases-head-2spine-no-vroid-v1.parquet`. When a UUID is
+present in both inputs, the newer no-VRoid processing record is used. The
+resulting SSOT manifest contains 68,371 assets: 63,742 train, 2,279 validation,
+and 2,350 test.
+
 To build its lightweight color-conditioned manifest:
 
 ```bash
