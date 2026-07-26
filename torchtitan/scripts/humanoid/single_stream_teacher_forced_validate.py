@@ -83,13 +83,13 @@ def parse_args() -> argparse.Namespace:
 
 
 def build_dataset_reader(
-    config: dict, manifest: Path
+    config: dict, manifest: Path, split: str
 ) -> RiggedHumanoidJointOctreeDataset:
     kwargs = dict(config["training"]["dataset_kwargs"])
     return RiggedHumanoidJointOctreeDataset(
         manifest_path=str(manifest),
         joint_schema_path=kwargs["joint_schema_path"],
-        split="train",
+        split=split,
         repeats=1,
         shuffle_seed=int(kwargs.get("shuffle_seed", 42)),
         grid_size=int(kwargs["grid_size"]),
@@ -141,8 +141,12 @@ def main() -> int:
     image_size = int(dataset_kwargs["image_resolution"])
     schema = json.loads(joint_schema_path.read_text(encoding="utf-8"))
 
-    dataset_reader = build_dataset_reader(config_dict, manifest)
+    dataset_reader = build_dataset_reader(config_dict, manifest, args.split)
     rig, octree_layers = dataset_reader.load_rig_layers_from_row(row)
+    gt_joints = rig.joints
+    gt_joint_ids = rig.joint_ids.cpu().numpy()
+    gt_parents = dataset_reader.schema.parents_for_ids(gt_joint_ids)
+    joint_names = [schema["joints"][joint_id] for joint_id in gt_joint_ids]
     mesh_layers = [
         SingleStreamTeacherForcedMeshLayer(
             centers=layer.layer_parent_centers[0],
@@ -192,15 +196,15 @@ def main() -> int:
         dtype=dtype,
         prediction=prediction,
         view_indices=[view_index],
-        num_joint_tokens=len(schema["joints"]),
+        joint_ids=rig.joint_ids,
     )
 
     predicted_joints = undiscretize(result.joints.cpu().numpy(), grid_size)
-    gt_joints = rig.joints
-    gt_joint_ids = rig.joint_ids.cpu().numpy()
-    gt_parents = dataset_reader.schema.parents_for_ids(gt_joint_ids)
-    joint_errors = np.linalg.norm(predicted_joints[gt_joint_ids] - gt_joints, axis=1)
+    if not np.array_equal(result.joint_ids.cpu().numpy(), gt_joint_ids):
+        raise RuntimeError("Pipeline output joint IDs do not match the requested subset")
+    joint_errors = np.linalg.norm(predicted_joints - gt_joints, axis=1)
     np.save(out_dir / "predicted_joints_nexus_normalized.npy", predicted_joints)
+    np.save(out_dir / "predicted_joint_ids.npy", gt_joint_ids)
 
     with np.load(
         dataset_reader._read_uri(str(row["rig_npz_uri"])), allow_pickle=True
@@ -212,8 +216,9 @@ def main() -> int:
     np.savez_compressed(
         skeleton_path,
         positions=mesh_space_joints,
-        joint_names=np.asarray(schema["joints"]),
-        parents=np.asarray(schema["parents"], dtype=np.int64),
+        joint_ids=gt_joint_ids,
+        joint_names=np.asarray(joint_names),
+        parents=gt_parents,
         uuid=np.asarray(sample_uuid),
         coordinate_space=np.asarray("rig_npz_and_mesh_glb"),
         rig_npz_uri=np.asarray(str(row["rig_npz_uri"])),
@@ -225,7 +230,7 @@ def main() -> int:
             mesh_vertices,
             mesh_faces,
             mesh_space_joints,
-            schema["parents"],
+            gt_parents.tolist(),
             out_dir,
         )
         glb_path = out_dir / "mesh_with_predicted_skeleton.glb"
@@ -233,8 +238,18 @@ def main() -> int:
             mesh_vertices,
             mesh_faces,
             mesh_space_joints,
-            schema["parents"],
+            gt_parents.tolist(),
             glb_path,
+        )
+        contact_sheet = out_dir / "condition_prediction_views.png"
+        make_contact_sheet(
+            [
+                ("condition", condition_path),
+                ("predicted left", view_paths["left"]),
+                ("predicted front", view_paths["front"]),
+                ("predicted right", view_paths["right"]),
+            ],
+            contact_sheet,
         )
         summary = {
             "sample_uuid": sample_uuid,
@@ -244,12 +259,15 @@ def main() -> int:
             "teacher_forced_mesh": True,
             "mesh_prediction_used": False,
             "joint_count": int(predicted_joints.shape[0]),
+            "evaluated_joint_ids": gt_joint_ids.tolist(),
+            "joint_names": joint_names,
             "mean_joint_error": float(joint_errors.mean()),
             "max_joint_error": float(joint_errors.max()),
             "prediction_coordinate_space": "rig_npz_and_mesh_glb",
             "predicted_skeleton": str(skeleton_path),
             "mesh_with_predicted_skeleton": str(glb_path),
             "multiview": str(multiview_path),
+            "contact_sheet": str(contact_sheet),
             "views": {name: str(path) for name, path in view_paths.items()},
             "source": str(row.get("source", "")),
             "skeleton_convention": str(row.get("skeleton_convention", "")),
@@ -278,7 +296,7 @@ def main() -> int:
         empty_faces,
         predicted_preview,
         joints=predicted_joints,
-        joint_parents=schema["parents"],
+        joint_parents=gt_parents,
     )
     contact_sheet = out_dir / "contact_sheet.png"
     make_contact_sheet(

@@ -59,7 +59,9 @@ torchrun --nproc-per-node=8 \
 
 `scripts/humanoid/single_stream_teacher_forced_validate.py` performs the matching
 layerwise rollout: GT mesh tokens remain fixed while the scheduler updates only
-the 28 semantic-joint tokens.
+the requested semantic-joint tokens. Test-split validation passes each asset's
+available global joint IDs, so missing joints are neither instantiated nor
+renumbered; callers that omit explicit IDs retain the full 28-joint default.
 
 Dataset configs may set `joint_selection = "available"` for mixed skeleton
 conventions. The schema remains one fixed semantic embedding vocabulary, but

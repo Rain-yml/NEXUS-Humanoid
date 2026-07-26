@@ -24,6 +24,7 @@ class SingleStreamTeacherForcedMeshLayer:
 class ImageMeshToSingleStreamJointOctreePipelineOutput(BaseOutput):
     joints: torch.Tensor
     joint_layers: List[torch.Tensor]
+    joint_ids: torch.Tensor
 
 
 class ImageMeshToSingleStreamJointOctreePipeline(DiffusionPipeline):
@@ -220,7 +221,8 @@ class ImageMeshToSingleStreamJointOctreePipeline(DiffusionPipeline):
         dtype=torch.float32,
         prediction: str = "x",
         view_indices: Optional[List[int]] = None,
-        num_joint_tokens: int = 28,
+        num_joint_tokens: Optional[int] = None,
+        joint_ids: Optional[torch.Tensor] = None,
     ) -> ImageMeshToSingleStreamJointOctreePipelineOutput:
         if not mesh_layers:
             raise ValueError("mesh_layers must contain at least one GT octree layer")
@@ -239,10 +241,32 @@ class ImageMeshToSingleStreamJointOctreePipeline(DiffusionPipeline):
         if do_cfg:
             negative_image_embeds = negative_image_embeds.to(dtype)
 
+        if joint_ids is None:
+            num_joint_tokens = 28 if num_joint_tokens is None else num_joint_tokens
+            if num_joint_tokens < 1:
+                raise ValueError("num_joint_tokens must be positive")
+            joint_ids = torch.arange(
+                num_joint_tokens, dtype=torch.long, device=device
+            )
+        else:
+            if num_joint_tokens is not None:
+                raise ValueError("Pass either joint_ids or num_joint_tokens, not both")
+            joint_ids = torch.as_tensor(
+                joint_ids, dtype=torch.long, device=device
+            )
+            if joint_ids.ndim != 1 or joint_ids.numel() == 0:
+                raise ValueError("joint_ids must be a non-empty 1D tensor")
+            if (joint_ids < 0).any():
+                raise ValueError("joint_ids must be non-negative")
+            if torch.unique(joint_ids).numel() != joint_ids.numel():
+                raise ValueError("joint_ids must not contain duplicates")
+
         joint_centers = torch.full(
-            (num_joint_tokens, 3), grid_size // 2, dtype=torch.long, device=device
+            (joint_ids.numel(), 3),
+            grid_size // 2,
+            dtype=torch.long,
+            device=device,
         )
-        joint_ids = torch.arange(num_joint_tokens, dtype=torch.long, device=device)
         joint_layers = [joint_centers]
         sub_voxel_size = grid_size // 2
 
@@ -271,4 +295,5 @@ class ImageMeshToSingleStreamJointOctreePipeline(DiffusionPipeline):
         return ImageMeshToSingleStreamJointOctreePipelineOutput(
             joints=joint_centers,
             joint_layers=joint_layers,
+            joint_ids=joint_ids,
         )
