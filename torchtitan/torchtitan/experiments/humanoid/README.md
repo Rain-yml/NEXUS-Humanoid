@@ -74,9 +74,10 @@ finger bases do not renumber any other joint.
 The reference-skeleton variant removes that fixed semantic vocabulary. Source
 adapters in `data/rig_records.py` convert canonical resaves and AniGenP
 voxelized NPZs into the same `vertices, joints, parents` contract. The dataset
-then creates a reference skeleton through hierarchical forward-kinematics
-augmentation: topology is fixed, while bounded local rotations and bone-length
-scales accumulate through each tree. It does not add independent joint noise.
+then creates a reference skeleton by applying one shared monotonic spatial warp
+to all joints. Independent global and low-frequency local stretches along the
+three canonical axes change body proportions without rotating individual
+joints, introducing articulation, or adding pointwise noise.
 
 Each reference encoder block applies the reused stage-2 graph message-passing
 layer over parent-child edges, followed by packed global self-attention with
@@ -86,23 +87,23 @@ single-stream model; clean mesh tokens, joint noising, NEXUS backbone weights,
 output head, and joint-only flow loss are unchanged.
 
 ```bash
-python scripts/humanoid/build_anigenp_manifest.py \
+uv run --no-project python scripts/humanoid/build_anigenp_manifest.py \
   --input /path/to/AniGenP/data/anigen/manifest_all.json \
-  --full-output /path/to/anigenp_asset_front_full_v2.parquet \
-  --train-output /path/to/anigenp_asset_front_train100k_v2.parquet
+  --full-output /path/to/anigenp_rest_front_full_v3.parquet \
+  --train-output /path/to/anigenp_rest_front_train_v3.parquet
 
 torchrun --nproc-per-node=8 \
   -m torchtitan.experiments.humanoid.single_stream_trainer \
   --job.config_file \
-  torchtitan/experiments/humanoid/configs/single_stream/front_anigen100k_reference_skeleton.toml
+  torchtitan/experiments/humanoid/configs/single_stream/front_anigen_rest_reference_skeleton.toml
 ```
 
-AniGenP manifests are asset-centered. Pose rows from the same base asset always
-share one deterministic split, and train subsets include complete asset groups.
-Each pose contributes one condition image: the available rendered camera whose
-direction is closest to the canonical front (`-Y`). Poses without a camera
-inside the configured 20-degree front cone are excluded. The selected frame
-index, azimuth, elevation, and angular error remain in the Parquet for auditing.
+AniGenP manifests contain exactly one row per base asset: pose index zero
+(`prate=0` in AniGenP metadata). Each asset is assigned to one deterministic
+split and contributes the rendered camera whose direction is closest to the
+canonical front (`-Y`). Assets without a camera inside the configured 20-degree
+front cone are excluded. The selected frame index, azimuth, elevation, and
+angular error remain in the Parquet for auditing.
 
 New architectural experiments should normally be sibling model or pipeline
 files with their own model flavor and TOML. Shared behavior should only be

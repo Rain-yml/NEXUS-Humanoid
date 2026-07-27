@@ -1,109 +1,123 @@
-"""Topology-preserving reference-skeleton augmentation."""
+"""Shared spatial augmentation for reference skeletons."""
 
 from __future__ import annotations
-
-import math
 
 import torch
 
 
-def _axis_angle_matrix(axis: torch.Tensor, angle: torch.Tensor) -> torch.Tensor:
-    axis = axis / axis.norm().clamp_min(1e-8)
-    x, y, z = axis.unbind()
-    zero = torch.zeros((), dtype=axis.dtype, device=axis.device)
-    skew = torch.stack(
-        [
-            torch.stack([zero, -z, y]),
-            torch.stack([z, zero, -x]),
-            torch.stack([-y, x, zero]),
-        ]
-    )
-    identity = torch.eye(3, dtype=axis.dtype, device=axis.device)
-    return identity + angle.sin() * skew + (1.0 - angle.cos()) * (skew @ skew)
+def _validate_skeleton(joints: torch.Tensor, parents: torch.Tensor) -> None:
+    if joints.ndim != 2 or joints.shape[1] != 3:
+        raise ValueError(f"Expected joints shaped (J, 3), got {tuple(joints.shape)}")
+    if parents.shape != (len(joints),):
+        raise ValueError(
+            f"Expected parents shaped ({len(joints)},), got {tuple(parents.shape)}"
+        )
 
-
-def _topological_order(parents: torch.Tensor) -> list[int]:
+    parents = parents.to(dtype=torch.long)
     pending = set(range(len(parents)))
-    order: list[int] = []
+    visited: set[int] = set()
     while pending:
         ready = [
             index
             for index in pending
-            if int(parents[index]) < 0 or int(parents[index]) in order
+            if int(parents[index]) < 0 or int(parents[index]) in visited
         ]
         if not ready:
             raise ValueError("Skeleton parents do not form an acyclic forest")
-        ready.sort()
-        order.extend(ready)
+        visited.update(ready)
         pending.difference_update(ready)
-    return order
+
+
+def _stretch_axis(
+    values: torch.Tensor,
+    *,
+    global_scale_log_std: float,
+    local_scale_log_std: float,
+    num_segments: int,
+    generator: torch.Generator | None,
+) -> torch.Tensor:
+    lower = values.min()
+    upper = values.max()
+    extent = upper - lower
+    if extent <= 1e-8:
+        return values.clone()
+
+    global_log_scale = torch.randn(
+        (), dtype=values.dtype, device=values.device, generator=generator
+    ) * global_scale_log_std
+    global_scale = global_log_scale.clamp(-0.25, 0.25).exp()
+
+    segment_log_scales = torch.randn(
+        num_segments,
+        dtype=values.dtype,
+        device=values.device,
+        generator=generator,
+    ) * local_scale_log_std
+    segment_scales = segment_log_scales.clamp(-0.25, 0.25).exp()
+    segment_widths = segment_scales / segment_scales.sum()
+    boundaries = torch.cat(
+        [
+            torch.zeros(1, dtype=values.dtype, device=values.device),
+            segment_widths.cumsum(dim=0),
+        ]
+    )
+
+    normalized = ((values - lower) / extent).clamp(0.0, 1.0)
+    segment_position = normalized * num_segments
+    segment_index = segment_position.floor().long().clamp(max=num_segments - 1)
+    fraction = segment_position - segment_index.to(values.dtype)
+    warped = boundaries[segment_index] + (
+        boundaries[segment_index + 1] - boundaries[segment_index]
+    ) * fraction
+
+    midpoint = (lower + upper) * 0.5
+    warped_values = lower + warped * extent
+    return midpoint + (warped_values - midpoint) * global_scale
 
 
 def augment_reference_skeleton(
     joints: torch.Tensor,
     parents: torch.Tensor,
     *,
-    max_local_rotation_degrees: float,
-    bone_length_log_std: float,
-    root_translation_std: float,
+    global_scale_log_std: float,
+    local_scale_log_std: float,
+    num_segments: int,
     generator: torch.Generator | None = None,
 ) -> torch.Tensor:
-    """Distort a skeleton through forward kinematics, never pointwise noise.
+    """Apply one monotonic, axis-aligned spatial warp to every joint.
 
-    Parent-child topology is unchanged. Local rotations accumulate down each
-    tree, and each bone receives a bounded multiplicative length change.
+    The deformation changes proportions without articulating individual bones:
+    joints that share a coordinate receive the same transformed coordinate, and
+    coordinate ordering is preserved along every axis.
     """
-    if joints.ndim != 2 or joints.shape[1] != 3:
-        raise ValueError(f"Expected joints shaped (J, 3), got {tuple(joints.shape)}")
-    if parents.shape != (len(joints),):
-        raise ValueError(f"Expected parents shaped ({len(joints)},), got {tuple(parents.shape)}")
-    if max_local_rotation_degrees < 0:
-        raise ValueError("max_local_rotation_degrees must be non-negative")
-    if bone_length_log_std < 0 or root_translation_std < 0:
+    _validate_skeleton(joints, parents)
+    if global_scale_log_std < 0 or local_scale_log_std < 0:
         raise ValueError("Augmentation standard deviations must be non-negative")
+    if num_segments < 1:
+        raise ValueError("num_segments must be positive")
 
     joints = joints.to(dtype=torch.float32)
-    parents = parents.to(dtype=torch.long)
-    order = _topological_order(parents)
-    result = torch.empty_like(joints)
-    rotations = torch.empty(
-        len(joints), 3, 3, dtype=joints.dtype, device=joints.device
-    )
-    max_angle = math.radians(max_local_rotation_degrees)
+    if global_scale_log_std == 0 and local_scale_log_std == 0:
+        return joints.clone()
 
-    for joint_index in order:
-        axis = torch.randn(
-            3, dtype=joints.dtype, device=joints.device, generator=generator
-        )
-        angle = (
-            torch.rand(
-                (), dtype=joints.dtype, device=joints.device, generator=generator
+    return torch.stack(
+        [
+            _stretch_axis(
+                joints[:, axis],
+                global_scale_log_std=global_scale_log_std,
+                local_scale_log_std=local_scale_log_std,
+                num_segments=num_segments,
+                generator=generator,
             )
-            * 2.0
-            - 1.0
-        ) * max_angle
-        local_rotation = _axis_angle_matrix(axis, angle)
-        parent = int(parents[joint_index])
-        if parent < 0:
-            rotations[joint_index] = local_rotation
-            translation = torch.randn(
-                3, dtype=joints.dtype, device=joints.device, generator=generator
-            ) * root_translation_std
-            result[joint_index] = joints[joint_index] + translation
-            continue
-
-        rotations[joint_index] = rotations[parent] @ local_rotation
-        bone = joints[joint_index] - joints[parent]
-        log_scale = torch.randn(
-            (), dtype=joints.dtype, device=joints.device, generator=generator
-        ) * bone_length_log_std
-        scale = log_scale.clamp(-0.25, 0.25).exp()
-        result[joint_index] = result[parent] + rotations[parent] @ (bone * scale)
-
-    return result
+            for axis in range(3)
+        ],
+        dim=-1,
+    )
 
 
-def skeleton_edges(parents: torch.Tensor, *, bidirectional: bool = True) -> torch.Tensor:
+def skeleton_edges(
+    parents: torch.Tensor, *, bidirectional: bool = True
+) -> torch.Tensor:
     """Return packed graph edges in source-target format."""
     children = torch.arange(len(parents), dtype=torch.long)
     valid = parents >= 0

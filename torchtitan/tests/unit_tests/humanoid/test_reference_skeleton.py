@@ -32,7 +32,7 @@ def test_anigen_rig_record_preserves_arbitrary_joint_order_and_parents():
     np.testing.assert_array_equal(record.joint_ids, [0, 1, 2])
 
 
-def test_reference_augmentation_is_fk_not_point_noise():
+def test_reference_augmentation_is_shared_monotonic_spatial_stretch():
     joints = torch.tensor(
         [
             [0.0, 0.0, 0.0],
@@ -45,18 +45,18 @@ def test_reference_augmentation_is_fk_not_point_noise():
     augmented = augment_reference_skeleton(
         joints,
         parents,
-        max_local_rotation_degrees=20.0,
-        bone_length_log_std=0.08,
-        root_translation_std=0.03,
+        global_scale_log_std=0.08,
+        local_scale_log_std=0.10,
+        num_segments=4,
         generator=torch.Generator().manual_seed(7),
     )
 
     assert not torch.equal(augmented, joints)
-    original_lengths = (joints[1:] - joints[parents[1:]]).norm(dim=-1)
-    augmented_lengths = (augmented[1:] - augmented[parents[1:]]).norm(dim=-1)
-    ratios = augmented_lengths / original_lengths
-    assert torch.all(ratios >= torch.exp(torch.tensor(-0.25)))
-    assert torch.all(ratios <= torch.exp(torch.tensor(0.25)))
+    original_differences = joints[:, None] - joints[None, :]
+    augmented_differences = augmented[:, None] - augmented[None, :]
+    assert torch.all(original_differences * augmented_differences >= -1e-7)
+    torch.testing.assert_close(augmented[0, 0], augmented[1, 0])
+    torch.testing.assert_close(augmented[0, 2], augmented[1, 2])
 
 
 def test_zero_reference_augmentation_is_identity():
@@ -67,9 +67,9 @@ def test_zero_reference_augmentation_is_identity():
     augmented = augment_reference_skeleton(
         joints,
         parents,
-        max_local_rotation_degrees=0.0,
-        bone_length_log_std=0.0,
-        root_translation_std=0.0,
+        global_scale_log_std=0.0,
+        local_scale_log_std=0.0,
+        num_segments=4,
         generator=torch.Generator().manual_seed(2),
     )
     torch.testing.assert_close(augmented, joints)

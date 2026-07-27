@@ -152,33 +152,22 @@ def convert_record(
     }
 
 
-def select_asset_groups(
+def select_assets(
     frame: pd.DataFrame,
     *,
     row_limit: int,
     seed: str,
 ) -> pd.DataFrame:
     train = frame.loc[frame["split"] == "train"].copy()
-    asset_ids = sorted(
-        train["base_asset_id"].unique(),
-        key=lambda asset_id: stable_key(asset_id, seed),
+    if train["base_asset_id"].duplicated().any():
+        raise ValueError("Rest-pose manifest contains multiple rows for one base asset")
+    train["_selection_key"] = train["base_asset_id"].map(
+        lambda asset_id: stable_key(asset_id, seed)
     )
-
-    selected_assets = []
-    selected_rows = 0
-    group_sizes = train.groupby("base_asset_id").size().to_dict()
-    for asset_id in asset_ids:
-        group_size = int(group_sizes[asset_id])
-        if selected_rows + group_size > row_limit:
-            continue
-        selected_assets.append(asset_id)
-        selected_rows += group_size
-        if selected_rows == row_limit:
-            break
-
     return (
-        train.loc[train["base_asset_id"].isin(selected_assets)]
-        .sort_values(["base_asset_id", "pose_index", "uuid"])
+        train.sort_values(["_selection_key", "base_asset_id"])
+        .head(row_limit)
+        .drop(columns="_selection_key")
         .reset_index(drop=True)
     )
 
@@ -189,8 +178,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--full-output", required=True, type=Path)
     parser.add_argument("--train-output", required=True, type=Path)
     parser.add_argument("--train-limit", type=int, default=100_000)
-    parser.add_argument("--selection-seed", default="anigenp-asset-subset-v2")
-    parser.add_argument("--split-seed", default="anigenp-asset-split-v2")
+    parser.add_argument("--rest-pose-index", type=int, default=0)
+    parser.add_argument("--selection-seed", default="anigenp-rest-subset-v3")
+    parser.add_argument("--split-seed", default="anigenp-asset-split-v3")
     parser.add_argument("--val-fraction", type=float, default=0.01)
     parser.add_argument("--test-fraction", type=float, default=0.05)
     parser.add_argument("--max-front-angle-degrees", type=float, default=20.0)
@@ -202,6 +192,8 @@ def main() -> None:
     args = parse_args()
     if args.train_limit < 1:
         raise ValueError("--train-limit must be positive")
+    if args.rest_pose_index < 0:
+        raise ValueError("--rest-pose-index must be non-negative")
     if not 0.0 <= args.val_fraction < 1.0:
         raise ValueError("--val-fraction must be in [0, 1)")
     if not 0.0 <= args.test_fraction < 1.0:
@@ -215,6 +207,12 @@ def main() -> None:
 
     with args.input.open("r", encoding="utf-8") as handle:
         source_records = json.load(handle)
+    source_row_count = len(source_records)
+    source_records = [
+        record
+        for record in source_records
+        if parse_instance_id(str(record["instance_id"]))[1] == args.rest_pose_index
+    ]
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
         rows = list(
             executor.map(
@@ -227,7 +225,7 @@ def main() -> None:
                 source_records,
             )
         )
-    source_row_count = len(rows)
+    rest_row_count = len(rows)
     frame = pd.DataFrame(rows)
     frame = frame.loc[
         frame["condition_camera_angle_deg"] <= args.max_front_angle_degrees
@@ -235,6 +233,13 @@ def main() -> None:
     if frame["uuid"].duplicated().any():
         duplicates = frame.loc[frame["uuid"].duplicated(), "uuid"].head().tolist()
         raise ValueError(f"AniGenP manifest has duplicate instance IDs: {duplicates}")
+    if frame["base_asset_id"].duplicated().any():
+        duplicates = (
+            frame.loc[frame["base_asset_id"].duplicated(), "base_asset_id"]
+            .head()
+            .tolist()
+        )
+        raise ValueError(f"Multiple rest rows found for base assets: {duplicates}")
     split_counts = frame.groupby("base_asset_id")["split"].nunique()
     if int(split_counts.max()) != 1:
         raise ValueError("Base assets cross dataset splits")
@@ -242,7 +247,7 @@ def main() -> None:
     args.full_output.parent.mkdir(parents=True, exist_ok=True)
     frame.to_parquet(args.full_output, index=False)
 
-    train = select_asset_groups(
+    train = select_assets(
         frame,
         row_limit=args.train_limit,
         seed=args.selection_seed,
@@ -251,14 +256,15 @@ def main() -> None:
     train.to_parquet(args.train_output, index=False)
 
     print(
-        f"front_accepted={len(frame):,} / {source_row_count:,}; "
+        f"rest_pose_index={args.rest_pose_index}; "
+        f"front_accepted={len(frame):,} / {rest_row_count:,} rest rows "
+        f"from {source_row_count:,} source rows; "
         f"max_angle={args.max_front_angle_degrees:.1f}deg -> {args.full_output}"
     )
     print(frame["split"].value_counts().sort_index().to_string())
     print(f"assets={frame['base_asset_id'].nunique():,}")
     print(
-        f"train_subset={len(train):,} rows / "
-        f"{train['base_asset_id'].nunique():,} assets -> {args.train_output}"
+        f"train_subset={len(train):,} rest-pose assets -> {args.train_output}"
     )
     print(
         "front camera error: "

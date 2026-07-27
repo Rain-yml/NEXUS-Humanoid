@@ -223,9 +223,9 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
         max_merged_vertices: int = 11_000,
         joint_selection: str = "strict",
         reference_skeleton_augmentation: bool = False,
-        reference_max_local_rotation_degrees: float = 20.0,
-        reference_bone_length_log_std: float = 0.08,
-        reference_root_translation_std: float = 0.03,
+        reference_global_scale_log_std: float = 0.08,
+        reference_local_scale_log_std: float = 0.10,
+        reference_warp_num_segments: int = 4,
         dp_rank: int = 0,
         dp_world_size: int = 1,
     ) -> None:
@@ -249,9 +249,9 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
             )
         self.joint_selection = joint_selection
         self.reference_skeleton_augmentation = reference_skeleton_augmentation
-        self.reference_max_local_rotation_degrees = reference_max_local_rotation_degrees
-        self.reference_bone_length_log_std = reference_bone_length_log_std
-        self.reference_root_translation_std = reference_root_translation_std
+        self.reference_global_scale_log_std = reference_global_scale_log_std
+        self.reference_local_scale_log_std = reference_local_scale_log_std
+        self.reference_warp_num_segments = reference_warp_num_segments
         if max_merged_vertices < 1:
             raise ValueError("max_merged_vertices must be positive")
         self.max_merged_vertices = max_merged_vertices
@@ -394,9 +394,9 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
             reference_joints = augment_reference_skeleton(
                 torch.from_numpy(rig.joints),
                 rig.parents,
-                max_local_rotation_degrees=self.reference_max_local_rotation_degrees,
-                bone_length_log_std=self.reference_bone_length_log_std,
-                root_translation_std=self.reference_root_translation_std,
+                global_scale_log_std=self.reference_global_scale_log_std,
+                local_scale_log_std=self.reference_local_scale_log_std,
+                num_segments=self.reference_warp_num_segments,
             ).clamp(-1.0, 1.0)
             result.update(
                 reference_joint_positions=reference_joints,

@@ -48,14 +48,14 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--stage1-output-root",
-        default="./outputs/humanoid_reference_skeleton_front_anigen100k_v2",
+        default="./outputs/humanoid_reference_skeleton_rest_front_anigen_v3",
     )
     parser.add_argument("--stage1-ckpt", default="")
     parser.add_argument(
         "--stage1-config",
         default=(
             "torchtitan/experiments/humanoid/configs/single_stream/"
-            "front_anigen100k_reference_skeleton.toml"
+            "front_anigen_rest_reference_skeleton.toml"
         ),
     )
     parser.add_argument("--stage1-ema", action="store_true", default=False)
@@ -63,7 +63,7 @@ def parse_args() -> argparse.Namespace:
         "--manifest",
         default=(
             "/mnt/pfs/users/liyumeng/data/rigged_humanoid/datasets/"
-            "anigenp_asset_front_full_v2.parquet"
+            "anigenp_rest_front_full_v3.parquet"
         ),
     )
     parser.add_argument("--split", choices=["train", "val", "test"], default="test")
@@ -71,7 +71,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-dir",
         default=(
-            "./outputs/humanoid_reference_skeleton_front_anigen100k_v2/"
+            "./outputs/humanoid_reference_skeleton_rest_front_anigen_v3/"
             "validation_teacher_forced"
         ),
     )
@@ -221,13 +221,11 @@ def main() -> int:
     reference_joints_tensor = augment_reference_skeleton(
         torch.from_numpy(gt_joints),
         rig.parents,
-        max_local_rotation_degrees=float(
-            dataset_kwargs["reference_max_local_rotation_degrees"]
+        global_scale_log_std=float(
+            dataset_kwargs["reference_global_scale_log_std"]
         ),
-        bone_length_log_std=float(dataset_kwargs["reference_bone_length_log_std"]),
-        root_translation_std=float(
-            dataset_kwargs["reference_root_translation_std"]
-        ),
+        local_scale_log_std=float(dataset_kwargs["reference_local_scale_log_std"]),
+        num_segments=int(dataset_kwargs["reference_warp_num_segments"]),
         generator=reference_generator,
     ).clamp(-1.0, 1.0)
     reference_joints = reference_joints_tensor.numpy()
