@@ -54,6 +54,11 @@ class ReferenceSkeletonEncoder(nn.Module):
                 for _ in range(num_blocks)
             ]
         )
+        # The final edge update has no downstream graph block to consume it.
+        final_graph_layer = self.graph_layers[-1]
+        final_graph_layer.attn.edge_mlp.requires_grad_(False)
+        final_graph_layer.norm2_edge.requires_grad_(False)
+        final_graph_layer.ffn_edge.requires_grad_(False)
         self.rope = RotaryPosEmbed3D(
             attention_head_dim=hidden_dim // num_attention_heads,
             max_seq_len=grid_size,

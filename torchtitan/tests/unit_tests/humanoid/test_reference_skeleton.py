@@ -140,3 +140,36 @@ def test_reference_encoder_rejects_skeleton_without_bones():
             edge_index=torch.empty(2, 0, dtype=torch.long),
             cu_seqlens=torch.tensor([0, 1], dtype=torch.int32),
         )
+
+
+def test_reference_encoder_does_not_optimize_discarded_final_edge_update():
+    encoder = ReferenceSkeletonEncoder(
+        hidden_dim=16,
+        edge_hidden_dim=8,
+        num_blocks=3,
+        num_attention_heads=4,
+        intermediate_size=32,
+        grid_size=16,
+        use_flash_attn_3=False,
+    )
+    final_graph_layer = encoder.graph_layers[-1]
+
+    assert all(
+        not parameter.requires_grad
+        for module in (
+            final_graph_layer.attn.edge_mlp,
+            final_graph_layer.norm2_edge,
+            final_graph_layer.ffn_edge,
+        )
+        for parameter in module.parameters()
+    )
+    assert all(
+        parameter.requires_grad
+        for module in (
+            final_graph_layer.attn.query_proj,
+            final_graph_layer.attn.key_proj,
+            final_graph_layer.attn.value_proj,
+            final_graph_layer.ffn_node,
+        )
+        for parameter in module.parameters()
+    )
