@@ -133,7 +133,6 @@ custom_args_module = "torchtitan.experiments.humanoid.arguments"
 enable_checkpoint = true
 folder = "ckpts"
 path_override = "./outputs/humanoid_reference_skeleton_rest_front_anigen_v3/ckpts"
-load_path_override = ""
 load_model_exclude_keys = []
 interval = 1000
 model_weights_only = false
