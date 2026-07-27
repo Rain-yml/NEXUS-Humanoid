@@ -97,6 +97,10 @@ class OversizedHumanoidRigError(ValueError):
     pass
 
 
+class DegenerateHumanoidRigError(ValueError):
+    pass
+
+
 def _normalize_like_nexus(vertices: np.ndarray, joints: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     minimum = vertices.min(axis=0)
     maximum = vertices.max(axis=0)
@@ -316,6 +320,11 @@ class RiggedHumanoidJointOctreeDataset(IterableDataset, Stateful):
                 rig_format=rig_format,
                 schema=self.schema,
                 joint_selection=self.joint_selection,
+            )
+        num_bones = int(np.count_nonzero(record.parents >= 0))
+        if num_bones == 0:
+            raise DegenerateHumanoidRigError(
+                f"Skeleton with {len(record.joints)} joint(s) has no bones"
             )
         vertices, joints = _normalize_like_nexus(record.vertices, record.joints)
         mesh_points = np.unique(discretize(vertices, self.grid_size), axis=0)

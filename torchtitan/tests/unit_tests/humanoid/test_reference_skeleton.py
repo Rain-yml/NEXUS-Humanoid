@@ -1,6 +1,11 @@
 import numpy as np
+import pytest
 import torch
 
+from torchtitan.experiments.humanoid.data.dataset import (
+    DegenerateHumanoidRigError,
+    RiggedHumanoidJointOctreeDataset,
+)
 from torchtitan.experiments.humanoid.data.rig_records import (
     ANIGEN_VOXELIZED_FORMAT,
     load_rig_record,
@@ -8,6 +13,9 @@ from torchtitan.experiments.humanoid.data.rig_records import (
 from torchtitan.experiments.humanoid.data.skeleton_augmentation import (
     augment_reference_skeleton,
     skeleton_edges,
+)
+from torchtitan.experiments.humanoid.models.reference_skeleton_encoder import (
+    ReferenceSkeletonEncoder,
 )
 
 
@@ -86,3 +94,49 @@ def test_skeleton_edges_are_bidirectional():
         (1, 3),
     }
     assert set(map(tuple, edges.t().tolist())) == expected
+
+
+def test_dataset_rejects_skeleton_without_bones(tmp_path):
+    rig_path = tmp_path / "one_joint.npz"
+    np.savez(
+        rig_path,
+        vertices=np.asarray(
+            [[-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]], dtype=np.float32
+        ),
+        joints=np.asarray([[0.0, 0.0, 0.0]], dtype=np.float32),
+        parents=np.asarray([None], dtype=object),
+    )
+    dataset = object.__new__(RiggedHumanoidJointOctreeDataset)
+    dataset._bos_client = None
+    dataset.schema = None
+    dataset.joint_selection = "strict"
+    dataset.grid_size = 512
+    dataset.max_merged_vertices = 11_000
+
+    with pytest.raises(DegenerateHumanoidRigError, match="has no bones"):
+        dataset._load_normalized_rig(
+            {
+                "rig_npz_uri": str(rig_path),
+                "rig_format": ANIGEN_VOXELIZED_FORMAT,
+            }
+        )
+
+
+def test_reference_encoder_rejects_skeleton_without_bones():
+    encoder = ReferenceSkeletonEncoder(
+        hidden_dim=16,
+        edge_hidden_dim=8,
+        num_blocks=1,
+        num_attention_heads=4,
+        intermediate_size=32,
+        grid_size=16,
+        use_flash_attn_3=False,
+    )
+
+    with pytest.raises(ValueError, match="at least one bone"):
+        encoder(
+            positions=torch.zeros(1, 3),
+            rope_positions=torch.zeros(1, 3, dtype=torch.long),
+            edge_index=torch.empty(2, 0, dtype=torch.long),
+            cu_seqlens=torch.tensor([0, 1], dtype=torch.int32),
+        )

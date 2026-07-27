@@ -108,24 +108,23 @@ class ReferenceSkeletonEncoder(nn.Module):
             raise ValueError("Reference RoPE positions must match reference positions")
         if edge_index.ndim != 2 or edge_index.shape[0] != 2:
             raise ValueError("Reference edge_index must have shape (2, E)")
+        if edge_index.shape[1] == 0:
+            raise ValueError("Reference skeleton must contain at least one bone")
         if int(cu_seqlens[-1]) != len(positions):
             raise ValueError("Reference cu_seqlens do not cover all joints")
 
         dtype = self.node_projection[0].weight.dtype
         positions = positions.to(dtype=dtype)
         hidden_states = self.node_projection(positions)
-        edge_features = None
-        if edge_index.shape[1] > 0:
-            edge_features = self.edge_projection(
-                self._edge_features(positions, edge_index).to(dtype=dtype)
-            )
+        edge_features = self.edge_projection(
+            self._edge_features(positions, edge_index).to(dtype=dtype)
+        )
         for graph_layer, global_layer in zip(
             self.graph_layers, self.global_layers, strict=True
         ):
-            if edge_features is not None:
-                hidden_states, edge_features = graph_layer(
-                    hidden_states, edge_index, edge_features
-                )
+            hidden_states, edge_features = graph_layer(
+                hidden_states, edge_index, edge_features
+            )
             hidden_states = global_layer(
                 hidden_states,
                 position_ids=rope_positions,
