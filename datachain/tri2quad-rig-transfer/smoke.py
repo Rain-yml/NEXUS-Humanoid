@@ -19,7 +19,6 @@ def main():
     parser.add_argument("--uuid", action="append", required=True)
     parser.add_argument("--output-bucket")
     parser.add_argument("--output-prefix", default="")
-    parser.add_argument("--expected-deformation-state", choices=("rest", "pose"))
     args = parser.parse_args()
     table = pq.read_table(args.manifest)
     bos = BOS()
@@ -36,14 +35,6 @@ def main():
         except Exception as error:
             print(json.dumps({"uuid": uuid, "error": f"{type(error).__name__}: {error}"}), flush=True)
             continue
-        if (
-            args.expected_deformation_state
-            and normalized.deformation_state != args.expected_deformation_state
-        ):
-            raise RuntimeError(
-                f"{uuid}: expected {args.expected_deformation_state} deformation "
-                f"state, got {normalized.deformation_state}"
-            )
         output_key = ""
         if args.output_bucket:
             output_key = artifact_key(args.output_prefix, uuid)
@@ -59,7 +50,6 @@ def main():
                     "producer_mode": normalized.producer_mode,
                     "max_coordinate_error": result.max_coordinate_error,
                     "source_to_final": result.source_to_final.tolist(),
-                    "deformation_state": normalized.deformation_state,
                     "output_key": output_key,
                 }
             ),

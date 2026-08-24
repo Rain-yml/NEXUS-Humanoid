@@ -6,9 +6,9 @@ from pathlib import Path
 
 import bpy
 import numpy as np
-from vrenderer.blender_utils import bake_scene, clear_scene, set_current_frame
+from vrenderer.blender_utils import bake_scene, clear_scene
 
-from contract import MAX_COORDINATE_ERROR, Rejection
+from contract import Rejection
 from producer_normalize import normalize_with_joint_markers
 from rig import RiggedMesh
 
@@ -18,32 +18,14 @@ class NormalizedRig:
     rig: RiggedMesh
     source_to_normalized: np.ndarray
     producer_mode: str
-    deformation_state: str
 
 
-def _world_points(obj, *, evaluated: bool = False) -> np.ndarray:
-    owner = (
-        obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
-        if evaluated
-        else obj
-    )
-    coordinates = np.empty(len(owner.data.vertices) * 3, dtype=np.float64)
-    owner.data.vertices.foreach_get("co", coordinates)
+def _world_points(obj) -> np.ndarray:
+    coordinates = np.empty(len(obj.data.vertices) * 3, dtype=np.float64)
+    obj.data.vertices.foreach_get("co", coordinates)
     coordinates = coordinates.reshape(-1, 3)
-    matrix = np.asarray(owner.matrix_world, dtype=np.float64)
+    matrix = np.asarray(obj.matrix_world, dtype=np.float64)
     return coordinates @ matrix[:3, :3].T + matrix[:3, 3]
-
-
-def _referenced_world_points(obj, *, evaluated: bool = False) -> np.ndarray:
-    owner = (
-        obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
-        if evaluated
-        else obj
-    )
-    referenced = sorted(
-        {vertex for polygon in owner.data.polygons for vertex in polygon.vertices}
-    )
-    return _world_points(obj, evaluated=evaluated)[referenced]
 
 
 def _mesh_objects():
@@ -60,21 +42,17 @@ def _capture_skeleton():
     )
     joint_keys = []
     names = []
-    pose_positions = []
-    rest_positions = []
+    positions = []
     parent_keys = []
     for armature in armatures:
         matrix = np.asarray(armature.matrix_world, dtype=np.float64)
-        for bone in armature.pose.bones:
+        armature.data.pose_position = "REST"
+        for bone in armature.data.bones:
             key = (armature.name, bone.name)
             joint_keys.append(key)
             names.append(bone.name)
-            head = np.asarray(bone.head, dtype=np.float64)
-            rest_head = np.asarray(
-                armature.data.bones[bone.name].head_local, dtype=np.float64
-            )
-            pose_positions.append(head @ matrix[:3, :3].T + matrix[:3, 3])
-            rest_positions.append(rest_head @ matrix[:3, :3].T + matrix[:3, 3])
+            head = np.asarray(bone.head_local, dtype=np.float64)
+            positions.append(head @ matrix[:3, :3].T + matrix[:3, 3])
             parent_keys.append(
                 (armature.name, bone.parent.name) if bone.parent is not None else None
             )
@@ -82,62 +60,7 @@ def _capture_skeleton():
         raise Rejection("no_rig", "Blender import contains no armature bones")
     index = {key: slot for slot, key in enumerate(joint_keys)}
     parents = np.asarray([index.get(key, -1) for key in parent_keys], dtype=np.int32)
-    return (
-        index,
-        np.asarray(names, dtype=np.str_),
-        np.asarray(pose_positions),
-        np.asarray(rest_positions),
-        parents,
-    )
-
-
-def _mesh_state_candidates(group_maps):
-    objects = {obj.name: obj for obj in _mesh_objects()}
-    return {
-        name: (
-            _referenced_world_points(objects[name]),
-            _referenced_world_points(objects[name], evaluated=True),
-        )
-        for name in group_maps
-    }
-
-
-def _coordinate_error(candidate: np.ndarray, actual: np.ndarray) -> float:
-    if candidate.shape != actual.shape:
-        return float("inf")
-    return float(np.abs(candidate - actual).max(initial=0.0))
-
-
-def _deformation_state(candidates) -> str:
-    objects = {obj.name: obj for obj in _mesh_objects()}
-    states = set()
-    details = []
-    for name, (rest_vertices, pose_vertices) in candidates.items():
-        if name not in objects:
-            raise Rejection("topology_changed", f"bake removed weighted mesh {name!r}")
-        actual = _referenced_world_points(objects[name])
-        rest_error = _coordinate_error(rest_vertices, actual)
-        pose_error = _coordinate_error(pose_vertices, actual)
-        rest_matches = rest_error <= MAX_COORDINATE_ERROR
-        pose_matches = pose_error <= MAX_COORDINATE_ERROR
-        details.append(
-            f"{name}:rest={rest_error:.9g},pose={pose_error:.9g}"
-        )
-        if rest_matches and not pose_matches:
-            states.add("rest")
-        elif pose_matches and not rest_matches:
-            states.add("pose")
-        elif not rest_matches and not pose_matches:
-            raise Rejection(
-                "unmatched_deformation_state",
-                "post-bake vertices match neither source state; " + "; ".join(details),
-            )
-    if len(states) > 1:
-        raise Rejection(
-            "mixed_deformation_state",
-            "weighted meshes were baked in different states; " + "; ".join(details),
-        )
-    return next(iter(states), "rest")
+    return index, np.asarray(names, dtype=np.str_), np.asarray(positions), parents
 
 
 def _mesh_group_maps(joint_index):
@@ -248,15 +171,11 @@ def normalize_source(payload: bytes, *, plus_y_front: bool) -> NormalizedRig:
             path = Path(directory) / "source.glb"
             path.write_bytes(payload)
             bpy.ops.import_scene.gltf(filepath=str(path), merge_vertices=True)
-        set_current_frame(1)
+        joint_index, names, source_joints, parents = _capture_skeleton()
         bpy.context.view_layer.update()
-        joint_index, names, pose_joints, rest_joints, parents = _capture_skeleton()
         group_maps = _mesh_group_maps(joint_index)
-        state_candidates = _mesh_state_candidates(group_maps)
 
         bake_scene()
-        deformation_state = _deformation_state(state_candidates)
-        source_joints = pose_joints if deformation_state == "pose" else rest_joints
         normalized_joints, source_to_normalized, _, _ = normalize_with_joint_markers(
             source_joints,
             (0, 0, 180) if plus_y_front else None,
@@ -276,7 +195,6 @@ def normalize_source(payload: bytes, *, plus_y_front: bool) -> NormalizedRig:
             ),
             source_to_normalized=source_to_normalized,
             producer_mode=mode,
-            deformation_state=deformation_state,
         )
     finally:
         cleanup_scene()

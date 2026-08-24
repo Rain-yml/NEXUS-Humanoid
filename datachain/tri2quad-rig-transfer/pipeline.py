@@ -84,7 +84,6 @@ def process(row: dict, bos: BOS, output_bucket: str, output_prefix: str) -> dict
         "artifact_bytes": len(payload),
         "max_coordinate_error": transfer.max_coordinate_error,
         "producer_mode": normalized.producer_mode,
-        "deformation_state": normalized.deformation_state,
         "schema": SCHEMA,
     }
 
@@ -107,6 +106,5 @@ def rejection(row: dict, error: Exception) -> dict:
         "artifact_bytes": 0,
         "max_coordinate_error": None,
         "producer_mode": "",
-        "deformation_state": "",
         "schema": SCHEMA,
     }

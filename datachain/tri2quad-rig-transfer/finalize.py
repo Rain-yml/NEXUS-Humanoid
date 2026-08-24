@@ -49,12 +49,12 @@ def main():
     )
     accepted_count = counts.pop("", 0)
     summary = {
-        "schema": "nexus.tri2quad-rig-transfer.summary.v1",
+        "schema": "nexus.tri2quad-rest-rig.summary.v1",
         "processed": total,
         "accepted": accepted_count,
         "rejected": total - accepted_count,
         "rejections": counts,
-        "acceptance_contract": "equal-cardinality bijection within two fixed digits_vertex=6 producer roundings",
+        "acceptance_contract": "rest-rig SSOT with equal-cardinality vertex bijection within two fixed digits_vertex=6 producer roundings",
     }
     (args.out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print(json.dumps(summary))

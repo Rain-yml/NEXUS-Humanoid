@@ -11,6 +11,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from datachain import BaseWorker
 
+from contract import SCHEMA
+
 RESULT_SCHEMA = pa.schema(
     [
         ("uuid", pa.string()),
@@ -29,7 +31,6 @@ RESULT_SCHEMA = pa.schema(
         ("artifact_bytes", pa.int64()),
         ("max_coordinate_error", pa.float64()),
         ("producer_mode", pa.string()),
-        ("deformation_state", pa.string()),
         ("schema", pa.string()),
     ]
 )
@@ -92,8 +93,7 @@ class Worker(BaseWorker):
                         "artifact_bytes": 0,
                         "max_coordinate_error": None,
                         "producer_mode": "",
-                        "deformation_state": "",
-                        "schema": "nexus.tri2quad-rig.v1",
+                        "schema": SCHEMA,
                     }
             records.append(record)
         try:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 
-SCHEMA = "nexus.tri2quad-rig.v1"
+SCHEMA = "nexus.tri2quad-rest-rig.v1"
 VERTEX_DIGITS = 6
 # Source normalization and Tri2Quad each perform a six-decimal vertex merge.
 MAX_COORDINATE_ERROR = 2.0 / 10**VERTEX_DIGITS

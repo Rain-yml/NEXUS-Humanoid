@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: liyumeng-tri2quad-rig-transfer-prepare
+  name: liyumeng-tri2quad-rest-rig-prepare
   namespace: liyumeng
 spec:
   backoffLimit: 0
@@ -24,10 +24,10 @@ spec:
           env:
             - {name: UV_PROJECT_ENVIRONMENT, value: /tmp/venv}
             - {name: UV_CACHE_DIR, value: /tmp/uv-cache}
-            - {name: TASK_NAME, value: tri2quad-rig-transfer-v1}
+            - {name: TASK_NAME, value: tri2quad-rest-rig-v1}
             - {name: MANIFEST, value: /mnt/pfs/users/liyumeng/data/nexus/tri2quad-rig-transfer-v1/input.parquet}
-            - {name: RUN_DIR, value: /mnt/pfs/users/liyumeng/data/nexus/tri2quad-rig-transfer-v1/work}
-            - {name: RESULT_PARTS_DIR, value: /mnt/pfs/users/liyumeng/data/nexus/tri2quad-rig-transfer-v1/parts}
+            - {name: RUN_DIR, value: /mnt/pfs/users/liyumeng/data/nexus/tri2quad-rest-rig-v1/work}
+            - {name: RESULT_PARTS_DIR, value: /mnt/pfs/users/liyumeng/data/nexus/tri2quad-rest-rig-v1/parts}
             - {name: ROWS_PER_TASK, value: "64"}
             - {name: TASKS_PER_FILE, value: "256"}
             - {name: REDIS_HOST, valueFrom: {secretKeyRef: {name: redis-secret, key: host}}}

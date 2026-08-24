@@ -26,23 +26,22 @@ spec:
               --manifest /mnt/pfs/users/liyumeng/data/nexus/tri2quad-rig-transfer-v1/input.parquet
               --uuid ef7ec109-9ce8-4f57-948c-a16974aaa470
               --output-bucket biped-data-resave-glb-npz
-              --output-prefix datasets/tri2quad-rig-transfer-v1 &&
+              --output-prefix datasets/tri2quad-rest-rig-v1 &&
               UV_PROJECT_ENVIRONMENT=/tmp/venv UV_CACHE_DIR=/tmp/uv-cache uv run --locked --no-sync python smoke.py
               --manifest /mnt/pfs/users/liyumeng/data/nexus/tri2quad-rig-transfer-v1/input.parquet
               --uuid 13010112-b13a-4b25-b6bf-17f169dc5145
               --output-bucket biped-data-resave-glb-npz
-              --output-prefix datasets/tri2quad-rig-transfer-v1 &&
+              --output-prefix datasets/tri2quad-rest-rig-v1 &&
               UV_PROJECT_ENVIRONMENT=/tmp/venv UV_CACHE_DIR=/tmp/uv-cache uv run --locked --no-sync python smoke.py
               --manifest /mnt/pfs/users/liyumeng/data/nexus/tri2quad-rig-transfer-v1/input.parquet
               --uuid eab7eac0-00c6-4c35-968b-211171fb0f59
               --output-bucket biped-data-resave-glb-npz
-              --output-prefix datasets/tri2quad-rig-transfer-v1 &&
+              --output-prefix datasets/tri2quad-rest-rig-v1 &&
               UV_PROJECT_ENVIRONMENT=/tmp/venv UV_CACHE_DIR=/tmp/uv-cache uv run --locked --no-sync python smoke.py
               --manifest /mnt/pfs/users/liyumeng/data/nexus/tri2quad-rig-transfer-v1/input.parquet
               --uuid 00016e8f-0f84-476b-b750-6c80e9f7add8
-              --expected-deformation-state rest
               --output-bucket biped-data-resave-glb-npz
-              --output-prefix datasets/tri2quad-rig-transfer-v1
+              --output-prefix datasets/tri2quad-rest-rig-v1
           env:
             - name: BOS_ENDPOINT
               value: bj.bcebos.com
