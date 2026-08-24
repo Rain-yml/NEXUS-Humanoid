@@ -29,6 +29,7 @@ RESULT_SCHEMA = pa.schema(
         ("artifact_bytes", pa.int64()),
         ("max_coordinate_error", pa.float64()),
         ("producer_mode", pa.string()),
+        ("deformation_state", pa.string()),
         ("schema", pa.string()),
     ]
 )
@@ -91,6 +92,7 @@ class Worker(BaseWorker):
                         "artifact_bytes": 0,
                         "max_coordinate_error": None,
                         "producer_mode": "",
+                        "deformation_state": "",
                         "schema": "nexus.tri2quad-rig.v1",
                     }
             records.append(record)

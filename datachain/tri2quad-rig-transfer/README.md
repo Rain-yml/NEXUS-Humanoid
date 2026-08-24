@@ -5,12 +5,14 @@ skinning weights onto the exact final Tri2Quad vertex array.
 
 ## Acceptance contract
 
-1. Import the source with the original VRenderer producer settings. Capture
-   posed bones and vertex groups, then run its exact frame-1 bake and
-   bounding-box normalization path.
+1. Import the source with the original VRenderer producer settings. Snapshot
+   base/rest and evaluated/posed vertices and bones, then run its exact
+   frame-1 bake. The post-bake weighted meshes must match one source state at
+   the fixed coordinate tolerance. Mixed and unrecognized states are rejected.
 2. Create joint markers in Blender world space, then parent those markers and
-   every mesh root to the same normalization root. The producer transform runs
-   once on that shared hierarchy; joint positions are read directly from the
+   every mesh root to the same normalization root. Markers use the rest or pose
+   bones proven by the post-bake vertex match. The producer transform runs once
+   on that shared hierarchy; joint positions are read directly from the
    transformed markers and are never reconstructed with a fitted affine.
 3. Merge vertices using Tri2Quad's fixed `digits_vertex=6` identity rule,
    remove the same degenerate/duplicate faces, and remove unreferenced vertices.
