@@ -28,6 +28,24 @@ RESULT_COLUMNS = (
 )
 
 
+def _display_rig(artifact) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    indices = artifact["weight_indices"]
+    weights = artifact["weight_values"]
+    used = np.unique(indices[(indices >= 0) & (weights > 0)])
+    remap = np.full(len(artifact["joint_positions"]), -1, dtype=np.int32)
+    remap[used] = np.arange(len(used), dtype=np.int32)
+    display_indices = np.where((indices >= 0) & (weights > 0), remap[indices], -1)
+
+    parents = artifact["parents"]
+    display_parents = []
+    for joint in used:
+        parent = int(parents[joint])
+        while parent >= 0 and remap[parent] < 0:
+            parent = int(parents[parent])
+        display_parents.append(int(remap[parent]) if parent >= 0 else -1)
+    return used, np.asarray(display_parents, np.int32), display_indices, weights
+
+
 class TransferResultSource:
     """Lazy view over atomically written transfer result parts and BOS NPZs."""
 
@@ -116,6 +134,7 @@ class TransferResultSource:
             str(row["output_bos_bucket"]), str(row["output_bos_key"])
         )
         with np.load(io.BytesIO(payload), allow_pickle=False) as artifact:
+            used, parents, weight_indices, weight_values = _display_rig(artifact)
             asset = Asset(
                 id=asset_id,
                 name=asset_id,
@@ -124,15 +143,15 @@ class TransferResultSource:
                     triangles=artifact["triangles"].tolist(),
                     quads=artifact["quads"].tolist(),
                     skinning=Skinning(
-                        joint_indices=artifact["weight_indices"].tolist(),
-                        weights=artifact["weight_values"].tolist(),
+                        joint_indices=weight_indices.tolist(),
+                        weights=weight_values.tolist(),
                     ),
                 ),
                 skeletons=[
                     Skeleton(
-                        positions=artifact["joint_positions"].tolist(),
-                        parents=artifact["parents"].tolist(),
-                        names=artifact["joint_names"].astype(str).tolist(),
+                        positions=artifact["joint_positions"][used].tolist(),
+                        parents=parents.tolist(),
+                        names=artifact["joint_names"][used].astype(str).tolist(),
                         label="Source rig",
                         color="#e7a84f",
                         xray=True,

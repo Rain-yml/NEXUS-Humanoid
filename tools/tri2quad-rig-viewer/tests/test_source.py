@@ -29,10 +29,10 @@ def artifact() -> bytes:
         vertices=np.asarray([[0, 0, 0], [1, 0, 0], [0, 1, 0]], np.float32),
         triangles=np.asarray([[0, 1, 2]], np.int32),
         quads=np.empty((0, 4), np.int32),
-        joint_names=np.asarray(["root", "tip"]),
-        joint_positions=np.asarray([[0, 0, 0], [0, 1, 0]], np.float32),
-        parents=np.asarray([-1, 0], np.int32),
-        weight_indices=np.asarray([[0, 1], [1, -1], [0, -1]], np.int32),
+        joint_names=np.asarray(["root", "unused", "tip"]),
+        joint_positions=np.asarray([[0, 0, 0], [0, 0.5, 0], [0, 1, 0]], np.float32),
+        parents=np.asarray([-1, 0, 1], np.int32),
+        weight_indices=np.asarray([[0, 2], [2, -1], [0, -1]], np.int32),
         weight_values=np.asarray([[0.75, 0.25], [1, 0], [1, 0]], np.float32),
     )
     return stream.getvalue()
@@ -77,6 +77,7 @@ class TransferResultSourceTest(unittest.TestCase):
             asset = source.get_asset("accepted")
             self.assertEqual(asset.mesh.vertices[1], [1.0, 0.0, 0.0])
             self.assertEqual(asset.skeletons[0].names, ["root", "tip"])
+            self.assertEqual(asset.skeletons[0].parents, [-1, 0])
             self.assertEqual(asset.mesh.skinning.joint_indices[0], [0, 1])
             self.assertEqual(asset.mesh.skinning.weights[0], [0.75, 0.25])
 
