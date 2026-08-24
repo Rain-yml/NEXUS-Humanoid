@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: liyumeng-tri2quad-rig-viewer
+  namespace: liyumeng
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: liyumeng-tri2quad-rig-viewer}
+  template:
+    metadata:
+      labels: {app: liyumeng-tri2quad-rig-viewer}
+    spec:
+      imagePullSecrets:
+        - name: vast-secret
+      containers:
+        - name: viewer
+          image: ccr-23gxup9u-vpc.cnc.bj.baidubce.com/model/cuda:11.8.0-runtime-graphics-ffmpeg-uv
+          workingDir: /mnt/pfs/users/liyumeng/code/NEXUS-Humanoid/tools/tri2quad-rig-viewer
+          command: ["/bin/sh", "-lc"]
+          args:
+            - >-
+              uv sync --locked &&
+              uv run --locked --no-sync python app.py
+          env:
+            - {name: UV_PROJECT_ENVIRONMENT, value: /tmp/venv}
+            - {name: UV_CACHE_DIR, value: /tmp/uv-cache}
+            - {name: RESULT_PARTS_DIR, value: /mnt/pfs/users/liyumeng/data/nexus/tri2quad-rig-transfer-v1/parts}
+            - {name: BOS_ENDPOINT, value: bj.bcebos.com}
+            - name: BOS_ACCESS_KEY
+              valueFrom:
+                secretKeyRef: {name: bos-credentials, key: access-key-id}
+            - name: BOS_SECRET_KEY
+              valueFrom:
+                secretKeyRef: {name: bos-credentials, key: secret-access-key}
+          ports:
+            - {name: http, containerPort: 8769}
+          readinessProbe:
+            httpGet: {path: /api/config, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests: {cpu: "2", memory: 8Gi, ephemeral-storage: 12Gi}
+            limits: {cpu: "2", memory: 8Gi, ephemeral-storage: 12Gi}
+          volumeMounts:
+            - {name: user, mountPath: /mnt/pfs/users/liyumeng}
+      volumes:
+        - name: user
+          hostPath: {path: /mnt/pfs/users/liyumeng}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: liyumeng-tri2quad-rig-viewer
+  namespace: liyumeng
+spec:
+  selector: {app: liyumeng-tri2quad-rig-viewer}
+  ports:
+    - {name: http, port: 8769, targetPort: http}

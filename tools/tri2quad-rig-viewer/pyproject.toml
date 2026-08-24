@@ -1,0 +1,13 @@
+[project]
+name = "tri2quad-rig-viewer"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "bce-python-sdk>=0.9.76",
+  "numpy>=1.26,<3",
+  "pyarrow>=18,<26",
+  "rigviz",
+]
+
+[tool.uv.sources]
+rigviz = { path = "../../../rigviz" }
