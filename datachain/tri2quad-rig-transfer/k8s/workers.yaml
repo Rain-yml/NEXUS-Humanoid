@@ -33,7 +33,7 @@ spec:
             - {name: OUTPUT_BOS_BUCKET, value: biped-data-resave-glb-npz}
             - {name: OUTPUT_BOS_PREFIX, value: datasets/tri2quad-rig-transfer-v1}
             - {name: RESULT_PARTS_DIR, value: /mnt/pfs/users/liyumeng/data/nexus/tri2quad-rig-transfer-v1/parts}
-            - {name: NUM_WORKERS, value: "1"}
+            - {name: NUM_WORKERS, value: "2"}
             - {name: BOS_ENDPOINT, value: bj.bcebos.com}
             - name: BOS_ACCESS_KEY
               valueFrom:
