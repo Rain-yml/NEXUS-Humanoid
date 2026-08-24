@@ -41,12 +41,21 @@ class Worker(BaseWorker):
         self.output_bucket = os.environ["OUTPUT_BOS_BUCKET"]
         self.output_prefix = os.environ["OUTPUT_BOS_PREFIX"]
         self.parts_dir = Path(os.environ["RESULT_PARTS_DIR"])
+        self.asset_timeout_seconds = int(os.environ.get("ASSET_TIMEOUT_SECONDS", "180"))
         self.parts_dir.mkdir(parents=True, exist_ok=True)
 
     def process_task(self, task):
         payload = dict(task["data"])
         shard_id = str(payload["shard_id"])
         output = self.parts_dir / f"{shard_id}.parquet"
+        if output.is_file():
+            return {
+                "stage": "tri2quad_rig_transfer",
+                "shard_id": shard_id,
+                "rows": len(payload["rows"]),
+                "part_path": str(output),
+                "task_id": task["id"],
+            }
         partial = output.with_suffix(".parquet.partial")
         records = []
         for row in payload["rows"]:
@@ -69,7 +78,13 @@ class Worker(BaseWorker):
                 ]
                 attempts = []
                 for _ in range(2):
-                    completed = subprocess.run(command, check=False)
+                    try:
+                        completed = subprocess.run(
+                            command, check=False, timeout=self.asset_timeout_seconds
+                        )
+                    except subprocess.TimeoutExpired:
+                        attempts.append(f"timeout:{self.asset_timeout_seconds}s")
+                        break
                     attempts.append(completed.returncode)
                     if completed.returncode == 0 and result_path.is_file():
                         break
@@ -79,7 +94,11 @@ class Worker(BaseWorker):
                     record = {
                         "uuid": str(row["uuid"]),
                         "status": "rejected",
-                        "reason": "blender_process_crash",
+                        "reason": (
+                            "blender_process_timeout"
+                            if attempts and str(attempts[-1]).startswith("timeout:")
+                            else "blender_process_crash"
+                        ),
                         "detail": f"isolated child exit codes: {attempts}",
                         "source": str(row.get("source", "")),
                         "source_bos_bucket": str(row.get("bos_bucket", "")),
