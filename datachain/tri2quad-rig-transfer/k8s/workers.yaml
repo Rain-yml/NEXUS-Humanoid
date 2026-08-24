@@ -21,10 +21,13 @@ spec:
           imagePullPolicy: IfNotPresent
           workingDir: /mnt/pfs/users/liyumeng/code/NEXUS-Humanoid/datachain/tri2quad-rig-transfer
           command: ["/bin/sh", "-lc"]
-          args: ["./run.sh"]
+          args:
+            - >-
+              uv sync --locked &&
+              ./run.sh
           env:
-            - {name: UV_PROJECT_ENVIRONMENT, value: /mnt/pfs/users/liyumeng/.cache/tri2quad-rig-transfer/environment}
-            - {name: UV_CACHE_DIR, value: /mnt/pfs/users/liyumeng/.cache/tri2quad-rig-transfer/uv-cache}
+            - {name: UV_PROJECT_ENVIRONMENT, value: /tmp/venv}
+            - {name: UV_CACHE_DIR, value: /tmp/uv-cache}
             - {name: UV_LINK_MODE, value: copy}
             - {name: TASK_NAME, value: tri2quad-rig-transfer-v1}
             - {name: OUTPUT_BOS_BUCKET, value: biped-data-resave-glb-npz}
@@ -52,8 +55,8 @@ spec:
                 secretKeyRef: {name: redis-secret, key: password}
             - {name: BLENDER_EXTERN_DRACO_LIBRARY_PATH, value: /mnt/pfs/share/draco/libextern_draco.so}
           resources:
-            requests: {cpu: "4", memory: 24Gi, ephemeral-storage: 24Gi}
-            limits: {cpu: "4", memory: 24Gi, ephemeral-storage: 24Gi}
+            requests: {cpu: "4", memory: 24Gi, ephemeral-storage: 32Gi}
+            limits: {cpu: "4", memory: 24Gi, ephemeral-storage: 32Gi}
           volumeMounts:
             - {name: user, mountPath: /mnt/pfs/users/liyumeng}
             - {name: share, mountPath: /mnt/pfs/share}

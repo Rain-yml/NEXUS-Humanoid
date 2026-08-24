@@ -17,10 +17,13 @@ spec:
           image: ccr-23gxup9u-vpc.cnc.bj.baidubce.com/model/cuda:11.8.0-runtime-graphics-ffmpeg-uv
           workingDir: /mnt/pfs/users/liyumeng/code/NEXUS-Humanoid/datachain/tri2quad-rig-transfer
           command: ["/bin/sh", "-lc"]
-          args: ["./prepare_run.sh"]
+          args:
+            - >-
+              uv sync --locked &&
+              ./prepare_run.sh
           env:
-            - {name: UV_PROJECT_ENVIRONMENT, value: /mnt/pfs/users/liyumeng/.cache/tri2quad-rig-transfer/environment}
-            - {name: UV_CACHE_DIR, value: /mnt/pfs/users/liyumeng/.cache/tri2quad-rig-transfer/uv-cache}
+            - {name: UV_PROJECT_ENVIRONMENT, value: /tmp/venv}
+            - {name: UV_CACHE_DIR, value: /tmp/uv-cache}
             - {name: TASK_NAME, value: tri2quad-rig-transfer-v1}
             - {name: MANIFEST, value: /mnt/pfs/users/liyumeng/data/nexus/tri2quad-rig-transfer-v1/input.parquet}
             - {name: RUN_DIR, value: /mnt/pfs/users/liyumeng/data/nexus/tri2quad-rig-transfer-v1/work}
@@ -32,8 +35,8 @@ spec:
             - {name: REDIS_DB, valueFrom: {secretKeyRef: {name: redis-secret, key: db}}}
             - {name: REDIS_PASSWORD, valueFrom: {secretKeyRef: {name: redis-secret, key: password}}}
           resources:
-            requests: {cpu: "4", memory: 16Gi, ephemeral-storage: 16Gi}
-            limits: {cpu: "4", memory: 16Gi, ephemeral-storage: 16Gi}
+            requests: {cpu: "4", memory: 16Gi, ephemeral-storage: 24Gi}
+            limits: {cpu: "4", memory: 16Gi, ephemeral-storage: 24Gi}
           volumeMounts:
             - {name: user, mountPath: /mnt/pfs/users/liyumeng}
             - {name: share, mountPath: /mnt/pfs/share}
