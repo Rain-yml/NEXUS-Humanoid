@@ -4,8 +4,8 @@ metadata:
   name: liyumeng-tri2quad-rig-transfer-v1
   namespace: liyumeng
 spec:
-  completions: 32
-  parallelism: 32
+  completions: 64
+  parallelism: 64
   backoffLimit: 64
   ttlSecondsAfterFinished: 7200
   template:
