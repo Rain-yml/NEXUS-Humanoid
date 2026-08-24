@@ -1,0 +1,44 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: liyumeng-tri2quad-rig-transfer-prepare
+  namespace: liyumeng
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 7200
+  template:
+    spec:
+      restartPolicy: Never
+      schedulerName: volcano
+      imagePullSecrets:
+        - name: vast-secret
+      containers:
+        - name: prepare
+          image: ccr-23gxup9u-vpc.cnc.bj.baidubce.com/model/cuda:11.8.0-runtime-graphics-ffmpeg-uv
+          workingDir: /mnt/pfs/users/liyumeng/code/NEXUS-Humanoid/datachain/tri2quad-rig-transfer
+          command: ["/bin/sh", "-lc"]
+          args: ["./prepare_run.sh"]
+          env:
+            - {name: UV_PROJECT_ENVIRONMENT, value: /mnt/pfs/users/liyumeng/.cache/tri2quad-rig-transfer/environment}
+            - {name: UV_CACHE_DIR, value: /mnt/pfs/users/liyumeng/.cache/tri2quad-rig-transfer/uv-cache}
+            - {name: TASK_NAME, value: tri2quad-rig-transfer-v1}
+            - {name: MANIFEST, value: /mnt/pfs/users/liyumeng/data/nexus/tri2quad-rig-transfer-v1/input.parquet}
+            - {name: RUN_DIR, value: /mnt/pfs/users/liyumeng/data/nexus/tri2quad-rig-transfer-v1/work}
+            - {name: RESULT_PARTS_DIR, value: /mnt/pfs/users/liyumeng/data/nexus/tri2quad-rig-transfer-v1/parts}
+            - {name: ROWS_PER_TASK, value: "1"}
+            - {name: TASKS_PER_FILE, value: "256"}
+            - {name: REDIS_HOST, valueFrom: {secretKeyRef: {name: redis-secret, key: host}}}
+            - {name: REDIS_PORT, valueFrom: {secretKeyRef: {name: redis-secret, key: port}}}
+            - {name: REDIS_DB, valueFrom: {secretKeyRef: {name: redis-secret, key: db}}}
+            - {name: REDIS_PASSWORD, valueFrom: {secretKeyRef: {name: redis-secret, key: password}}}
+          resources:
+            requests: {cpu: "4", memory: 16Gi, ephemeral-storage: 16Gi}
+            limits: {cpu: "4", memory: 16Gi, ephemeral-storage: 16Gi}
+          volumeMounts:
+            - {name: user, mountPath: /mnt/pfs/users/liyumeng}
+            - {name: share, mountPath: /mnt/pfs/share}
+      volumes:
+        - name: user
+          hostPath: {path: /mnt/pfs/users/liyumeng}
+        - name: share
+          hostPath: {path: /mnt/pfs/share}

@@ -1,0 +1,28 @@
+[project]
+name = "tri2quad-rig-transfer"
+version = "0.1.0"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "bce-python-sdk>=0.9,<1",
+    "bpy",
+    "datachain",
+    "duckdb>=1.3,<2",
+    "meshio>=5.3,<6",
+    "numpy>=1.24,<2",
+    "pyarrow>=20,<26",
+    "scipy>=1.13,<2",
+    "vrenderer",
+]
+
+[dependency-groups]
+dev = ["pytest>=8,<10"]
+
+[tool.uv.sources]
+datachain = { path = "/mnt/pfs/share/wheels/datachain-1.3.0-py3-none-any.whl" }
+bpy = { path = "/mnt/pfs/share/wheels/bpy-4.3.0-cp311-cp311-manylinux_2_28_x86_64.whl" }
+vrenderer = { path = "/mnt/pfs/share/wheels/vrenderer-2.5.1-py3-none-any.whl" }
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true

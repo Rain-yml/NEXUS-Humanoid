@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+TASK_NAME=${TASK_NAME:?TASK_NAME is required}
+OUTPUT_BOS_BUCKET=${OUTPUT_BOS_BUCKET:?OUTPUT_BOS_BUCKET is required}
+OUTPUT_BOS_PREFIX=${OUTPUT_BOS_PREFIX:?OUTPUT_BOS_PREFIX is required}
+RESULT_PARTS_DIR=${RESULT_PARTS_DIR:?RESULT_PARTS_DIR is required}
+NUM_WORKERS=${NUM_WORKERS:-4}
+
+exec env UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-/root/pyenv}" \
+  OUTPUT_BOS_BUCKET="$OUTPUT_BOS_BUCKET" OUTPUT_BOS_PREFIX="$OUTPUT_BOS_PREFIX" \
+  RESULT_PARTS_DIR="$RESULT_PARTS_DIR" \
+  uv run --locked --no-sync python -m datachain run worker.py \
+  --task-name "$TASK_NAME" --num-workers "$NUM_WORKERS"

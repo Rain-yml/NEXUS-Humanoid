@@ -1,0 +1,5 @@
+[worker]
+restart_max_retries = 3
+max_retries = 1
+idle_timeout = 5
+poll_interval = 1

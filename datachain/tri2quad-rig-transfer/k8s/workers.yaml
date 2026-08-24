@@ -1,0 +1,64 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: liyumeng-tri2quad-rig-transfer-v1
+  namespace: liyumeng
+spec:
+  completions: 32
+  parallelism: 32
+  backoffLimit: 64
+  ttlSecondsAfterFinished: 7200
+  template:
+    spec:
+      restartPolicy: OnFailure
+      schedulerName: volcano
+      terminationGracePeriodSeconds: 60
+      imagePullSecrets:
+        - name: vast-secret
+      containers:
+        - name: worker
+          image: ccr-23gxup9u-vpc.cnc.bj.baidubce.com/model/cuda:11.8.0-runtime-graphics-ffmpeg-uv
+          imagePullPolicy: IfNotPresent
+          workingDir: /mnt/pfs/users/liyumeng/code/NEXUS-Humanoid/datachain/tri2quad-rig-transfer
+          command: ["/bin/sh", "-lc"]
+          args: ["./run.sh"]
+          env:
+            - {name: UV_PROJECT_ENVIRONMENT, value: /mnt/pfs/users/liyumeng/.cache/tri2quad-rig-transfer/environment}
+            - {name: UV_CACHE_DIR, value: /mnt/pfs/users/liyumeng/.cache/tri2quad-rig-transfer/uv-cache}
+            - {name: UV_LINK_MODE, value: copy}
+            - {name: TASK_NAME, value: tri2quad-rig-transfer-v1}
+            - {name: OUTPUT_BOS_BUCKET, value: biped-data-resave-glb-npz}
+            - {name: OUTPUT_BOS_PREFIX, value: datasets/tri2quad-rig-transfer-v1}
+            - {name: RESULT_PARTS_DIR, value: /mnt/pfs/users/liyumeng/data/nexus/tri2quad-rig-transfer-v1/parts}
+            - {name: NUM_WORKERS, value: "1"}
+            - {name: BOS_ENDPOINT, value: bj.bcebos.com}
+            - name: BOS_ACCESS_KEY
+              valueFrom:
+                secretKeyRef: {name: bos-credentials, key: access-key-id}
+            - name: BOS_SECRET_KEY
+              valueFrom:
+                secretKeyRef: {name: bos-credentials, key: secret-access-key}
+            - name: REDIS_HOST
+              valueFrom:
+                secretKeyRef: {name: redis-secret, key: host}
+            - name: REDIS_PORT
+              valueFrom:
+                secretKeyRef: {name: redis-secret, key: port}
+            - name: REDIS_DB
+              valueFrom:
+                secretKeyRef: {name: redis-secret, key: db}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: redis-secret, key: password}
+            - {name: BLENDER_EXTERN_DRACO_LIBRARY_PATH, value: /mnt/pfs/share/draco/libextern_draco.so}
+          resources:
+            requests: {cpu: "4", memory: 24Gi, ephemeral-storage: 24Gi}
+            limits: {cpu: "4", memory: 24Gi, ephemeral-storage: 24Gi}
+          volumeMounts:
+            - {name: user, mountPath: /mnt/pfs/users/liyumeng}
+            - {name: share, mountPath: /mnt/pfs/share}
+      volumes:
+        - name: user
+          hostPath: {path: /mnt/pfs/users/liyumeng}
+        - name: share
+          hostPath: {path: /mnt/pfs/share}

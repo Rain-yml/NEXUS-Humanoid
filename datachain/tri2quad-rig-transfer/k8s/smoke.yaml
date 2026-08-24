@@ -1,0 +1,61 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: liyumeng-tri2quad-rig-transfer-smoke
+  namespace: liyumeng
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 7200
+  template:
+    spec:
+      restartPolicy: Never
+      schedulerName: volcano
+      imagePullSecrets:
+        - name: vast-secret
+      containers:
+        - name: worker
+          image: ccr-23gxup9u-vpc.cnc.bj.baidubce.com/model/cuda:11.8.0-runtime-graphics-ffmpeg-uv
+          imagePullPolicy: IfNotPresent
+          workingDir: /mnt/pfs/users/liyumeng/code/NEXUS-Humanoid/datachain/tri2quad-rig-transfer
+          command: ["/bin/sh", "-lc"]
+          args:
+            - >-
+              UV_PROJECT_ENVIRONMENT=/tmp/venv UV_CACHE_DIR=/tmp/uv-cache uv sync --locked &&
+              UV_PROJECT_ENVIRONMENT=/tmp/venv UV_CACHE_DIR=/tmp/uv-cache uv run --locked --no-sync pytest -q &&
+              UV_PROJECT_ENVIRONMENT=/tmp/venv UV_CACHE_DIR=/tmp/uv-cache uv run --locked --no-sync python smoke.py
+              --manifest /mnt/pfs/users/liyumeng/data/nexus/tri2quad-rig-transfer-v1/input.parquet
+              --uuid ef7ec109-9ce8-4f57-948c-a16974aaa470
+              --output-bucket biped-data-resave-glb-npz
+              --output-prefix datasets/tri2quad-rig-transfer-v1 &&
+              UV_PROJECT_ENVIRONMENT=/tmp/venv UV_CACHE_DIR=/tmp/uv-cache uv run --locked --no-sync python smoke.py
+              --manifest /mnt/pfs/users/liyumeng/data/nexus/tri2quad-rig-transfer-v1/input.parquet
+              --uuid 13010112-b13a-4b25-b6bf-17f169dc5145
+              --output-bucket biped-data-resave-glb-npz
+              --output-prefix datasets/tri2quad-rig-transfer-v1 &&
+              UV_PROJECT_ENVIRONMENT=/tmp/venv UV_CACHE_DIR=/tmp/uv-cache uv run --locked --no-sync python smoke.py
+              --manifest /mnt/pfs/users/liyumeng/data/nexus/tri2quad-rig-transfer-v1/input.parquet
+              --uuid eab7eac0-00c6-4c35-968b-211171fb0f59
+              --output-bucket biped-data-resave-glb-npz
+              --output-prefix datasets/tri2quad-rig-transfer-v1
+          env:
+            - name: BOS_ENDPOINT
+              value: bj.bcebos.com
+            - name: BOS_ACCESS_KEY
+              valueFrom:
+                secretKeyRef: {name: bos-credentials, key: access-key-id}
+            - name: BOS_SECRET_KEY
+              valueFrom:
+                secretKeyRef: {name: bos-credentials, key: secret-access-key}
+            - name: BLENDER_EXTERN_DRACO_LIBRARY_PATH
+              value: /mnt/pfs/share/draco/libextern_draco.so
+          resources:
+            requests: {cpu: "4", memory: 24Gi, ephemeral-storage: 24Gi}
+            limits: {cpu: "4", memory: 24Gi, ephemeral-storage: 24Gi}
+          volumeMounts:
+            - {name: user, mountPath: /mnt/pfs/users/liyumeng}
+            - {name: share, mountPath: /mnt/pfs/share}
+      volumes:
+        - name: user
+          hostPath: {path: /mnt/pfs/users/liyumeng}
+        - name: share
+          hostPath: {path: /mnt/pfs/share}
