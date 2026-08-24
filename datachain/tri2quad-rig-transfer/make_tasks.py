@@ -23,7 +23,7 @@ def main():
     parser = argparse.ArgumentParser(description="Build bounded DataChain task files")
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--rows-per-task", type=int, default=1)
+    parser.add_argument("--rows-per-task", type=int, default=64)
     parser.add_argument("--tasks-per-file", type=int, default=256)
     parser.add_argument("--limit", type=int, default=0)
     args = parser.parse_args()

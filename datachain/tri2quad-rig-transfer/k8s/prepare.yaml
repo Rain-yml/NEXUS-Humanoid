@@ -28,7 +28,7 @@ spec:
             - {name: MANIFEST, value: /mnt/pfs/users/liyumeng/data/nexus/tri2quad-rig-transfer-v1/input.parquet}
             - {name: RUN_DIR, value: /mnt/pfs/users/liyumeng/data/nexus/tri2quad-rig-transfer-v1/work}
             - {name: RESULT_PARTS_DIR, value: /mnt/pfs/users/liyumeng/data/nexus/tri2quad-rig-transfer-v1/parts}
-            - {name: ROWS_PER_TASK, value: "1"}
+            - {name: ROWS_PER_TASK, value: "64"}
             - {name: TASKS_PER_FILE, value: "256"}
             - {name: REDIS_HOST, valueFrom: {secretKeyRef: {name: redis-secret, key: host}}}
             - {name: REDIS_PORT, valueFrom: {secretKeyRef: {name: redis-secret, key: port}}}
