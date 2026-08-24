@@ -11,6 +11,9 @@ from scipy.spatial import cKDTree
 from contract import MAX_COORDINATE_ERROR
 
 
+ORIENTATION_DEPENDENT_FAILURES = {"non_bijective_vertices", "vertex_mismatch"}
+
+
 def artifact_key(prefix: str, uuid: str) -> str:
     root = prefix.strip("/")
     return f"{root}/{uuid[:2]}/{uuid}.npz" if root else f"{uuid[:2]}/{uuid}.npz"
@@ -37,6 +40,8 @@ def solve(source: bytes, final):
         return normalized, transfer
     except Rejection as error:
         if error.code == "ambiguous_producer_mode":
+            raise
+        if error.code not in ORIENTATION_DEPENDENT_FAILURES:
             raise
         failures.append(f"native_front={error.code}: {error}")
     try:
